@@ -1,0 +1,868 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "binary"
+}
+datasource db {
+  provider = "postgresql"
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  INACTIVE
+  ERROR
+}
+
+enum TransactionDirection {
+  DEBIT
+  CREDIT
+}
+
+enum TransactionPurpose {
+  PERSONAL
+  BUSINESS
+  SPLIT
+  UNCERTAIN
+}
+
+enum CashFlowType {
+  INCOME
+  EXPENSE
+  TRANSFER
+  REFUND
+  REIMBURSEMENT
+  ADJUSTMENT
+}
+
+enum TransactionStatus {
+  PENDING
+  POSTED
+  REMOVED
+}
+
+enum ReviewStatus {
+  UNREVIEWED
+  REVIEWED
+  NEEDS_REVIEW
+}
+
+enum AssignmentSource {
+  PLAID
+  RULE
+  USER
+  OVERRIDE
+  SYSTEM
+}
+
+enum BudgetPeriodType {
+  MONTHLY
+}
+
+enum BudgetAlertType {
+  THRESHOLD_80
+  THRESHOLD_100
+  PROJECTED_OVER_BUDGET
+}
+
+enum AlertStatus {
+  ACTIVE
+  RESOLVED
+  DISMISSED
+}
+
+enum ForecastStatus {
+  ON_TRACK
+  WATCH
+  OVER_BUDGET
+  BELOW_PACE
+}
+
+enum PayFrequency {
+  WEEKLY
+  BIWEEKLY
+  SEMIMONTHLY
+  MONTHLY
+  IRREGULAR
+}
+
+enum IncomeType {
+  SALARY_PAYROLL
+  BUSINESS_INCOME
+  TRANSFER
+  REFUND
+  REIMBURSEMENT
+  INTEREST
+  MISC_CREDIT
+}
+
+enum WatchMatchType {
+  EXACT
+  FUZZY
+}
+
+enum WatchMatchStatus {
+  NEW
+  ACKNOWLEDGED
+  DISMISSED
+}
+
+enum ExportFormat {
+  CSV
+  XLSX
+  PDF
+}
+
+enum ExportMode {
+  SUMMARY_ONLY
+  ITEMIZED_ONLY
+  SUMMARY_AND_ITEMIZED
+}
+
+enum ExportScope {
+  ALL
+  PERSONAL_ONLY
+  BUSINESS_ONLY
+  TRIP_TAGGED
+}
+
+enum ExportGroupBy {
+  NONE
+  CATEGORY
+  MERCHANT
+  MONTH
+}
+
+enum ExportStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum EntityType {
+  TRANSACTION
+  BUDGET
+  EXPORT
+  WATCHLIST
+  INCOME
+  SYSTEM
+}
+
+model User {
+  id                         String                          @id @default(cuid())
+  name                       String?
+  email                      String?                         @unique
+  emailVerified              DateTime?
+  image                      String?
+  passwordHash               String?
+  onboardingCompletedAt      DateTime?
+  createdAt                  DateTime                        @default(now())
+  updatedAt                  DateTime                        @updatedAt
+  accounts                   Account[]
+  sessions                   Session[]
+  bankConnections            BankConnection[]
+  bankAccounts               BankAccount[]
+  syncCursors                SyncCursor[]
+  webhookEvents              WebhookEvent[]
+  transactionRaws            TransactionRaw[]
+  transactions               Transaction[]
+  transactionNotes           TransactionNote[]
+  transactionFlags           TransactionFlag[]
+  transactionCategoryAssigns TransactionCategoryAssignment[]
+  transactionPurposeAssigns  TransactionPurposeAssignment[]
+  categories                 Category[]
+  merchantRules              MerchantRule[]
+  categoryOverrideRules      CategoryOverrideRule[]
+  purposeOverrideRules       PurposeOverrideRule[]
+  budgets                    Budget[]
+  budgetPeriods              BudgetPeriod[]
+  budgetAlerts               BudgetAlert[]
+  merchantProfiles           MerchantProfile[]
+  subscriptionCandidates     SubscriptionCandidate[]
+  spendingInsights           SpendingInsight[]
+  savingsOpportunities       SavingsOpportunity[]
+  forecastSnapshots          ForecastSnapshot[]
+  incomeSources              IncomeSource[]
+  employerProfiles           EmployerProfile[]
+  incomeSchedules            IncomeSchedule[]
+  incomePredictions          IncomePrediction[]
+  incomeAlerts               IncomeAlert[]
+  watchRules                 WatchRule[]
+  watchMatches               WatchMatch[]
+  exportRuns                 ExportRun[]
+  auditLogs                  AuditLog[]
+}
+
+model Account {
+  id                String   @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model BankConnection {
+  id                   String           @id @default(cuid())
+  userId               String
+  plaidItemId          String           @unique
+  institutionId        String?
+  institutionName      String?
+  accessTokenEncrypted String
+  status               ConnectionStatus @default(ACTIVE)
+  lastSyncedAt         DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accounts             BankAccount[]
+  syncCursors          SyncCursor[]
+  webhookEvents        WebhookEvent[]
+  rawTransactions      TransactionRaw[]
+
+  @@index([userId])
+}
+
+model BankAccount {
+  id               String           @id @default(cuid())
+  userId           String
+  bankConnectionId String
+  plaidAccountId   String           @unique
+  mask             String?
+  name             String
+  officialName     String?
+  type             String
+  subtype          String?
+  currentBalance   Decimal?         @db.Decimal(14, 2)
+  availableBalance Decimal?         @db.Decimal(14, 2)
+  currencyCode     String           @default("USD")
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankConnection   BankConnection   @relation(fields: [bankConnectionId], references: [id], onDelete: Cascade)
+  rawTransactions  TransactionRaw[]
+  transactions     Transaction[]
+
+  @@index([userId])
+  @@index([bankConnectionId])
+}
+
+model SyncCursor {
+  id               String         @id @default(cuid())
+  userId           String
+  bankConnectionId String
+  cursor           String
+  syncedAt         DateTime       @default(now())
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankConnection   BankConnection @relation(fields: [bankConnectionId], references: [id], onDelete: Cascade)
+
+  @@unique([bankConnectionId, cursor])
+  @@index([userId])
+  @@index([bankConnectionId, syncedAt])
+}
+
+model WebhookEvent {
+  id               String          @id @default(cuid())
+  userId           String
+  bankConnectionId String?
+  source           String          @default("plaid")
+  eventType        String
+  eventCode        String?
+  payload          Json
+  processedAt      DateTime?
+  createdAt        DateTime        @default(now())
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankConnection   BankConnection? @relation(fields: [bankConnectionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([bankConnectionId])
+}
+
+model TransactionRaw {
+  id                 String          @id @default(cuid())
+  userId             String
+  bankConnectionId   String?
+  bankAccountId      String?
+  plaidTransactionId String?
+  payload            Json
+  authorizedAt       DateTime?
+  postedAt           DateTime?
+  amount             Decimal?        @db.Decimal(14, 2)
+  currency           String?
+  isPending          Boolean         @default(true)
+  importedAt         DateTime        @default(now())
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankConnection     BankConnection? @relation(fields: [bankConnectionId], references: [id], onDelete: SetNull)
+  bankAccount        BankAccount?    @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  transaction        Transaction?
+
+  @@index([userId, importedAt])
+  @@index([bankConnectionId])
+  @@index([bankAccountId])
+  @@index([plaidTransactionId])
+}
+
+model Transaction {
+  id                  String                          @id @default(cuid())
+  userId              String
+  bankAccountId       String?
+  transactionRawId    String?                         @unique
+  plaidTransactionId  String?                         @unique
+  date                DateTime
+  authorizedAt        DateTime?
+  postedAt            DateTime?
+  amount              Decimal                         @db.Decimal(14, 2)
+  currency            String                          @default("USD")
+  direction           TransactionDirection
+  merchantRaw         String?
+  merchantNormalized  String?
+  description         String?
+  categoryPrimary     String?
+  categoryDetailed    String?
+  purpose             TransactionPurpose              @default(UNCERTAIN)
+  cashFlowType        CashFlowType                    @default(EXPENSE)
+  status              TransactionStatus               @default(PENDING)
+  isSuspicious        Boolean                         @default(false)
+  isRecurring         Boolean                         @default(false)
+  reviewStatus        ReviewStatus                    @default(UNREVIEWED)
+  createdAt           DateTime                        @default(now())
+  updatedAt           DateTime                        @updatedAt
+  user                User                            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount         BankAccount?                    @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  transactionRaw      TransactionRaw?                 @relation(fields: [transactionRawId], references: [id], onDelete: SetNull)
+  splits              TransactionSplit[]
+  notes               TransactionNote[]
+  flags               TransactionFlag[]
+  categoryAssignments TransactionCategoryAssignment[]
+  purposeAssignments  TransactionPurposeAssignment[]
+  watchRulesCreated   WatchRule[]
+  watchMatches        WatchMatch[]
+
+  @@index([userId, date])
+  @@index([bankAccountId, date])
+  @@index([plaidTransactionId])
+  @@index([purpose])
+  @@index([cashFlowType])
+  @@index([reviewStatus])
+}
+
+model TransactionSplit {
+  id              String      @id @default(cuid())
+  transactionId   String
+  personalAmount  Decimal     @db.Decimal(14, 2)
+  businessAmount  Decimal     @db.Decimal(14, 2)
+  splitMethod     String
+  personalPercent Decimal?    @db.Decimal(5, 2)
+  businessPercent Decimal?    @db.Decimal(5, 2)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  transaction     Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+}
+
+model TransactionNote {
+  id            String      @id @default(cuid())
+  transactionId String
+  userId        String
+  note          String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@index([userId])
+}
+
+model TransactionFlag {
+  id            String      @id @default(cuid())
+  transactionId String
+  userId        String
+  flagType      String      @default("suspicious")
+  reason        String?
+  createdAt     DateTime    @default(now())
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@index([userId, flagType])
+}
+
+model Category {
+  id            String                          @id @default(cuid())
+  userId        String?
+  key           String
+  name          String
+  parentKey     String?
+  isSystem      Boolean                         @default(false)
+  createdAt     DateTime                        @default(now())
+  updatedAt     DateTime                        @updatedAt
+  user          User?                           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignments   TransactionCategoryAssignment[]
+  budgets       Budget[]
+  merchantRules MerchantRule[]
+  watchRules    WatchRule[]
+  forecasts     ForecastSnapshot[]
+
+  @@unique([userId, key])
+  @@index([key])
+}
+
+model TransactionCategoryAssignment {
+  id            String           @id @default(cuid())
+  transactionId String
+  userId        String
+  categoryId    String?
+  categoryKey   String?
+  source        AssignmentSource @default(SYSTEM)
+  confidence    Decimal?         @db.Decimal(5, 2)
+  isCurrent     Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  transaction   Transaction      @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category      Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([transactionId, isCurrent])
+  @@index([userId, createdAt])
+  @@index([categoryId])
+}
+
+model TransactionPurposeAssignment {
+  id            String             @id @default(cuid())
+  transactionId String
+  userId        String
+  purpose       TransactionPurpose
+  source        AssignmentSource   @default(SYSTEM)
+  confidence    Decimal?           @db.Decimal(5, 2)
+  isCurrent     Boolean            @default(true)
+  createdAt     DateTime           @default(now())
+  transaction   Transaction        @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId, isCurrent])
+  @@index([userId, createdAt])
+}
+
+model MerchantRule {
+  id                 String              @id @default(cuid())
+  userId             String
+  merchantPattern    String
+  normalizedMerchant String?
+  categoryId         String?
+  categoryKey        String?
+  purpose            TransactionPurpose?
+  cashFlowType       CashFlowType?
+  priority           Int                 @default(100)
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category           Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isActive])
+  @@index([categoryId])
+}
+
+model CategoryOverrideRule {
+  id                 String   @id @default(cuid())
+  userId             String
+  merchantPattern    String?
+  descriptionPattern String?
+  amountMin          Decimal? @db.Decimal(14, 2)
+  amountMax          Decimal? @db.Decimal(14, 2)
+  categoryFromKey    String?
+  categoryToKey      String
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+}
+
+model PurposeOverrideRule {
+  id                 String             @id @default(cuid())
+  userId             String
+  merchantPattern    String?
+  descriptionPattern String?
+  amountMin          Decimal?           @db.Decimal(14, 2)
+  amountMax          Decimal?           @db.Decimal(14, 2)
+  purposeTo          TransactionPurpose
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+}
+
+model Budget {
+  id              String           @id @default(cuid())
+  userId          String
+  categoryId      String?
+  categoryKey     String?
+  name            String
+  periodType      BudgetPeriodType @default(MONTHLY)
+  amount          Decimal          @db.Decimal(14, 2)
+  alert80Enabled  Boolean          @default(true)
+  alert100Enabled Boolean          @default(true)
+  rolloverEnabled Boolean          @default(false)
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category        Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  periods         BudgetPeriod[]
+  budgetAlerts    BudgetAlert[]
+
+  @@index([userId, isActive])
+  @@index([categoryId])
+}
+
+model BudgetPeriod {
+  id              String        @id @default(cuid())
+  budgetId        String
+  userId          String
+  periodStart     DateTime
+  periodEnd       DateTime
+  actualSpend     Decimal       @default(0) @db.Decimal(14, 2)
+  pendingSpend    Decimal       @default(0) @db.Decimal(14, 2)
+  projectedSpend  Decimal?      @db.Decimal(14, 2)
+  remainingBudget Decimal?      @db.Decimal(14, 2)
+  progressPercent Decimal?      @db.Decimal(5, 2)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  budget          Budget        @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  alerts          BudgetAlert[]
+
+  @@unique([budgetId, periodStart, periodEnd])
+  @@index([userId, periodStart, periodEnd])
+}
+
+model BudgetAlert {
+  id             String          @id @default(cuid())
+  budgetId       String
+  budgetPeriodId String
+  userId         String
+  type           BudgetAlertType
+  status         AlertStatus     @default(ACTIVE)
+  message        String?
+  triggeredAt    DateTime        @default(now())
+  resolvedAt     DateTime?
+  budget         Budget          @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  budgetPeriod   BudgetPeriod    @relation(fields: [budgetPeriodId], references: [id], onDelete: Cascade)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([budgetId, type, status])
+  @@index([userId, triggeredAt])
+}
+
+model MerchantProfile {
+  id                     String                  @id @default(cuid())
+  userId                 String
+  merchantRaw            String
+  merchantNormalized     String
+  transactionCount       Int                     @default(0)
+  totalSpend             Decimal                 @default(0) @db.Decimal(14, 2)
+  totalIncome            Decimal                 @default(0) @db.Decimal(14, 2)
+  firstSeenAt            DateTime?
+  lastSeenAt             DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  user                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionCandidates SubscriptionCandidate[]
+
+  @@unique([userId, merchantNormalized])
+  @@index([userId, lastSeenAt])
+}
+
+model SubscriptionCandidate {
+  id                String           @id @default(cuid())
+  userId            String
+  merchantProfileId String?
+  merchantName      String
+  estimatedAmount   Decimal?         @db.Decimal(14, 2)
+  cadenceDays       Int?
+  confidenceScore   Decimal?         @db.Decimal(5, 2)
+  isConfirmed       Boolean          @default(false)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  merchantProfile   MerchantProfile? @relation(fields: [merchantProfileId], references: [id], onDelete: SetNull)
+
+  @@index([userId, confidenceScore])
+  @@index([merchantProfileId])
+}
+
+model SpendingInsight {
+  id             String    @id @default(cuid())
+  userId         String
+  insightType    String
+  title          String
+  body           String
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  metricValue    Decimal?  @db.Decimal(14, 2)
+  trendDirection String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model SavingsOpportunity {
+  id                String   @id @default(cuid())
+  userId            String
+  title             String
+  description       String
+  monthlySavingsEst Decimal? @db.Decimal(14, 2)
+  confidenceScore   Decimal? @db.Decimal(5, 2)
+  status            String   @default("open")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+model ForecastSnapshot {
+  id                   String         @id @default(cuid())
+  userId               String
+  periodStart          DateTime
+  periodEnd            DateTime
+  categoryId           String?
+  categoryKey          String?
+  actualSpent          Decimal        @default(0) @db.Decimal(14, 2)
+  pendingSpent         Decimal        @default(0) @db.Decimal(14, 2)
+  projectedSpent       Decimal        @default(0) @db.Decimal(14, 2)
+  budgetAmount         Decimal?       @db.Decimal(14, 2)
+  projectedIncome      Decimal?       @db.Decimal(14, 2)
+  projectedNetCashFlow Decimal?       @db.Decimal(14, 2)
+  status               ForecastStatus @default(ON_TRACK)
+  explanation          String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  user                 User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category             Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([userId, periodStart, periodEnd])
+  @@index([categoryId])
+}
+
+model IncomeSource {
+  id                String           @id @default(cuid())
+  userId            String
+  employerProfileId String?
+  sourceType        IncomeType
+  name              String
+  normalizedName    String?
+  transactionCount  Int              @default(0)
+  totalAmount       Decimal          @default(0) @db.Decimal(14, 2)
+  firstSeenAt       DateTime?
+  lastSeenAt        DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employerProfile   EmployerProfile? @relation(fields: [employerProfileId], references: [id], onDelete: SetNull)
+
+  @@index([userId, sourceType])
+  @@index([employerProfileId])
+}
+
+model EmployerProfile {
+  id                  String             @id @default(cuid())
+  userId              String
+  nameRaw             String
+  nameNormalized      String
+  payrollProcessor    String?
+  payFrequency        PayFrequency?
+  averageNetAmount    Decimal?           @db.Decimal(14, 2)
+  lastPayDate         DateTime?
+  nextExpectedPayDate DateTime?
+  confidenceScore     Decimal?           @db.Decimal(5, 2)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  incomeSources       IncomeSource[]
+  schedules           IncomeSchedule[]
+  predictions         IncomePrediction[]
+  alerts              IncomeAlert[]
+
+  @@unique([userId, nameNormalized])
+  @@index([userId, nextExpectedPayDate])
+}
+
+model IncomeSchedule {
+  id                String           @id @default(cuid())
+  userId            String
+  employerProfileId String?
+  payFrequency      PayFrequency
+  typicalAmount     Decimal?         @db.Decimal(14, 2)
+  amountMin         Decimal?         @db.Decimal(14, 2)
+  amountMax         Decimal?         @db.Decimal(14, 2)
+  weekday           Int?
+  dayOfMonth        Int?
+  isActive          Boolean          @default(true)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employerProfile   EmployerProfile? @relation(fields: [employerProfileId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isActive])
+  @@index([employerProfileId])
+}
+
+model IncomePrediction {
+  id                String           @id @default(cuid())
+  userId            String
+  employerProfileId String?
+  expectedDate      DateTime
+  expectedAmount    Decimal?         @db.Decimal(14, 2)
+  confidenceScore   Decimal?         @db.Decimal(5, 2)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employerProfile   EmployerProfile? @relation(fields: [employerProfileId], references: [id], onDelete: SetNull)
+
+  @@index([userId, expectedDate])
+  @@index([employerProfileId])
+}
+
+model IncomeAlert {
+  id                String           @id @default(cuid())
+  userId            String
+  employerProfileId String?
+  alertType         String
+  message           String
+  status            AlertStatus      @default(ACTIVE)
+  triggeredAt       DateTime         @default(now())
+  resolvedAt        DateTime?
+  createdAt         DateTime         @default(now())
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employerProfile   EmployerProfile? @relation(fields: [employerProfileId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, triggeredAt])
+  @@index([employerProfileId])
+}
+
+model WatchRule {
+  id                       String         @id @default(cuid())
+  userId                   String
+  createdFromTransactionId String?
+  categoryId               String?
+  categoryKey              String?
+  merchantPattern          String
+  amountMin                Decimal?       @db.Decimal(14, 2)
+  amountMax                Decimal?       @db.Decimal(14, 2)
+  matchType                WatchMatchType @default(FUZZY)
+  accountContextId         String?
+  isActive                 Boolean        @default(true)
+  note                     String?
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+  user                     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdFromTransaction   Transaction?   @relation(fields: [createdFromTransactionId], references: [id], onDelete: SetNull)
+  category                 Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  matches                  WatchMatch[]
+
+  @@index([userId, isActive])
+  @@index([createdFromTransactionId])
+  @@index([categoryId])
+}
+
+model WatchMatch {
+  id              String           @id @default(cuid())
+  userId          String
+  watchRuleId     String
+  transactionId   String
+  similarityScore Decimal?         @db.Decimal(5, 2)
+  status          WatchMatchStatus @default(NEW)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  watchRule       WatchRule        @relation(fields: [watchRuleId], references: [id], onDelete: Cascade)
+  transaction     Transaction      @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@unique([watchRuleId, transactionId])
+  @@index([userId, status, createdAt])
+  @@index([transactionId])
+}
+
+model ExportRun {
+  id           String        @id @default(cuid())
+  userId       String
+  format       ExportFormat
+  mode         ExportMode
+  scope        ExportScope
+  groupBy      ExportGroupBy @default(NONE)
+  periodStart  DateTime?
+  periodEnd    DateTime?
+  filePath     String?
+  rowCount     Int?
+  totalAmount  Decimal?      @db.Decimal(14, 2)
+  status       ExportStatus  @default(QUEUED)
+  errorMessage String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  completedAt  DateTime?
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model AuditLog {
+  id         String     @id @default(cuid())
+  userId     String?
+  entityType EntityType
+  entityId   String?
+  action     String
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime   @default(now())
+  user       User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+}
+
+
+
