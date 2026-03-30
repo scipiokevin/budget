@@ -1,4 +1,5 @@
-import { CashFlowType, Prisma, ReviewStatus, TransactionPurpose as PrismaTransactionPurpose, TransactionStatus as PrismaTransactionStatus } from "@prisma/client";
+import { CashFlowType, ReviewStatus, TransactionPurpose as PrismaTransactionPurpose, TransactionStatus as PrismaTransactionStatus } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type {
   DashboardLinkedAccount,

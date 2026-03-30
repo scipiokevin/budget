@@ -1,4 +1,5 @@
-import { CashFlowType, Prisma, TransactionStatus } from "@prisma/client";
+import { CashFlowType, TransactionStatus } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { getBudgetsDataFromPrisma } from "@/lib/db/budget-forecast-store";
 import { prisma } from "@/lib/db/prisma";
 import type { SmartInsightCard, SmartInsightSeverity, SmartInsightType } from "@/types/contracts";

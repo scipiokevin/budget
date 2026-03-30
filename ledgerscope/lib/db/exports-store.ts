@@ -1,4 +1,5 @@
-import { CashFlowType, ExportFormat, ExportMode, ExportScope, ExportStatus, Prisma, TransactionPurpose, TransactionStatus } from "@prisma/client";
+import { CashFlowType, ExportFormat, ExportMode, ExportScope, ExportStatus, TransactionPurpose, TransactionStatus } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/db/prisma";

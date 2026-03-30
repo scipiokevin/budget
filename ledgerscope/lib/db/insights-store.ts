@@ -1,4 +1,5 @@
-import { CashFlowType, Prisma, TransactionStatus } from "@prisma/client";
+import { CashFlowType, TransactionStatus } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { getSmartInsightsFromPrisma } from "@/lib/db/smart-insights-store";
 import { getLatestMortgageRates } from "@/lib/services/mortgage-rates";

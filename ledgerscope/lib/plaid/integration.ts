@@ -1,12 +1,12 @@
 import {
   CashFlowType,
   ConnectionStatus,
-  Prisma,
   ReviewStatus,
   TransactionDirection,
   TransactionStatus,
   TransactionPurpose,
 } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { recomputeSmartInsights } from "@/lib/db/smart-insights-store";
 import { evaluateWatchMatchesForUser } from "@/lib/db/watchlist-store";

@@ -1,4 +1,5 @@
-import { Prisma, TransactionStatus, WatchMatchStatus, WatchMatchType } from "@prisma/client";
+import { TransactionStatus, WatchMatchStatus, WatchMatchType } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type {
   WatchCandidateTransaction,
