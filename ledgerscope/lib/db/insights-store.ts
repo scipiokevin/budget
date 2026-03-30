@@ -1,5 +1,3 @@
-import { CashFlowType, TransactionStatus } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { getSmartInsightsFromPrisma } from "@/lib/db/smart-insights-store";
 import { getLatestMortgageRates } from "@/lib/services/mortgage-rates";
@@ -18,7 +16,26 @@ const TAG_PREFIX = "TAG:";
 const CUSTOM_TAG_PREFIX = "CUSTOM_TAG:";
 const TRIP_ASSIGN_PREFIX = "trip:";
 
-function toNumber(value: Prisma.Decimal | number | null | undefined): number {
+type DecimalLike = { toString(): string };
+type PrismaCashFlowType =
+  | "INCOME"
+  | "EXPENSE"
+  | "TRANSFER"
+  | "REFUND"
+  | "REIMBURSEMENT"
+  | "ADJUSTMENT";
+type PrismaTransactionStatus = "PENDING" | "POSTED" | "REMOVED";
+
+const CASH_FLOW_TYPE = {
+  INCOME: "INCOME",
+  EXPENSE: "EXPENSE",
+} as const satisfies Record<"INCOME" | "EXPENSE", PrismaCashFlowType>;
+
+const TRANSACTION_STATUS = {
+  REMOVED: "REMOVED",
+} as const satisfies Record<"REMOVED", PrismaTransactionStatus>;
+
+function toNumber(value: DecimalLike | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
   return typeof value === "number" ? value : Number(value.toString());
 }
@@ -118,8 +135,8 @@ export async function getInsightsDataFromPrisma(userId: string): Promise<Insight
   const rows = await prisma.transaction.findMany({
     where: {
       userId,
-      status: { not: TransactionStatus.REMOVED },
-      cashFlowType: CashFlowType.EXPENSE,
+      status: { not: TRANSACTION_STATUS.REMOVED },
+      cashFlowType: CASH_FLOW_TYPE.EXPENSE,
     },
     include: {
       notes: { select: { note: true } },

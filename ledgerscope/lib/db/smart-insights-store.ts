@@ -1,5 +1,3 @@
-import { CashFlowType, TransactionStatus } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
 import { getBudgetsDataFromPrisma } from "@/lib/db/budget-forecast-store";
 import { prisma } from "@/lib/db/prisma";
 import type { SmartInsightCard, SmartInsightSeverity, SmartInsightType } from "@/types/contracts";
@@ -14,7 +12,26 @@ type GeneratedInsight = {
   metricValue?: number;
 };
 
-function toNumber(value: Prisma.Decimal | number | null | undefined): number {
+type DecimalLike = { toString(): string };
+type PrismaCashFlowType =
+  | "INCOME"
+  | "EXPENSE"
+  | "TRANSFER"
+  | "REFUND"
+  | "REIMBURSEMENT"
+  | "ADJUSTMENT";
+type PrismaTransactionStatus = "PENDING" | "POSTED" | "REMOVED";
+
+const CASH_FLOW_TYPE = {
+  INCOME: "INCOME",
+  EXPENSE: "EXPENSE",
+} as const satisfies Record<"INCOME" | "EXPENSE", PrismaCashFlowType>;
+
+const TRANSACTION_STATUS = {
+  REMOVED: "REMOVED",
+} as const satisfies Record<"REMOVED", PrismaTransactionStatus>;
+
+function toNumber(value: DecimalLike | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
   return typeof value === "number" ? value : Number(value.toString());
 }
@@ -282,7 +299,7 @@ export async function recomputeSmartInsights(userId: string): Promise<void> {
     prisma.transaction.findMany({
       where: {
         userId,
-        status: { not: TransactionStatus.REMOVED },
+        status: { not: TRANSACTION_STATUS.REMOVED },
         date: { gte: previousStart, lte: currentEnd },
       },
       select: {
@@ -300,22 +317,22 @@ export async function recomputeSmartInsights(userId: string): Promise<void> {
   const prevRows = txRows.filter((row) => row.date >= previousStart && row.date <= previousEnd);
 
   const totalIncome = currentRows
-    .filter((row) => row.cashFlowType === CashFlowType.INCOME)
+    .filter((row) => row.cashFlowType === CASH_FLOW_TYPE.INCOME)
     .reduce((sum, row) => sum + toNumber(row.amount), 0);
   const totalExpense = currentRows
-    .filter((row) => row.cashFlowType === CashFlowType.EXPENSE)
+    .filter((row) => row.cashFlowType === CASH_FLOW_TYPE.EXPENSE)
     .reduce((sum, row) => sum + toNumber(row.amount), 0);
 
   const currentExpenseByCategory = currentRows
-    .filter((row) => row.cashFlowType === CashFlowType.EXPENSE)
+    .filter((row) => row.cashFlowType === CASH_FLOW_TYPE.EXPENSE)
     .map((row) => ({ category: row.categoryPrimary ?? "Uncategorized", amount: toNumber(row.amount) }));
   const previousExpenseByCategory = prevRows
-    .filter((row) => row.cashFlowType === CashFlowType.EXPENSE)
+    .filter((row) => row.cashFlowType === CASH_FLOW_TYPE.EXPENSE)
     .map((row) => ({ category: row.categoryPrimary ?? "Uncategorized", amount: toNumber(row.amount) }));
 
   const currentExpenseByMerchantMap = new Map<string, { amount: number; count: number }>();
   for (const row of currentRows) {
-    if (row.cashFlowType !== CashFlowType.EXPENSE) continue;
+    if (row.cashFlowType !== CASH_FLOW_TYPE.EXPENSE) continue;
     const merchant = row.merchantRaw ?? "Unknown merchant";
     const current = currentExpenseByMerchantMap.get(merchant) ?? { amount: 0, count: 0 };
     current.amount += toNumber(row.amount);
@@ -327,9 +344,9 @@ export async function recomputeSmartInsights(userId: string): Promise<void> {
   const repeatRows = await prisma.transaction.findMany({
     where: {
       userId,
-      status: { not: TransactionStatus.REMOVED },
+      status: { not: TRANSACTION_STATUS.REMOVED },
       date: { gte: repeatWindowStart, lte: now },
-      cashFlowType: CashFlowType.EXPENSE,
+      cashFlowType: CASH_FLOW_TYPE.EXPENSE,
     },
     select: {
       merchantRaw: true,
