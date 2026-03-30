@@ -1,4 +1,4 @@
-import { BudgetAlertType, ForecastStatus, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type {
   BudgetAlert,
@@ -13,31 +13,47 @@ import type {
 
 const PACE_FACTOR = 0.18;
 
+type PrismaBudgetAlertType = "THRESHOLD_80" | "THRESHOLD_100" | "PROJECTED_OVER_BUDGET";
+type PrismaForecastStatus = "ON_TRACK" | "WATCH" | "OVER_BUDGET" | "BELOW_PACE";
+
+const BUDGET_ALERT_TYPE = {
+  THRESHOLD_80: "THRESHOLD_80",
+  THRESHOLD_100: "THRESHOLD_100",
+  PROJECTED_OVER_BUDGET: "PROJECTED_OVER_BUDGET",
+} as const satisfies Record<string, PrismaBudgetAlertType>;
+
+const FORECAST_STATUS = {
+  ON_TRACK: "ON_TRACK",
+  WATCH: "WATCH",
+  OVER_BUDGET: "OVER_BUDGET",
+  BELOW_PACE: "BELOW_PACE",
+} as const satisfies Record<string, PrismaForecastStatus>;
+
 function toNumber(value: Prisma.Decimal | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
   return typeof value === "number" ? value : Number(value.toString());
 }
 
-function toPrismaStatus(status: UiForecastStatus): ForecastStatus {
+function toPrismaStatus(status: UiForecastStatus): PrismaForecastStatus {
   switch (status) {
     case "over_budget":
-      return ForecastStatus.OVER_BUDGET;
+      return FORECAST_STATUS.OVER_BUDGET;
     case "watch":
-      return ForecastStatus.WATCH;
+      return FORECAST_STATUS.WATCH;
     case "below_pace":
-      return ForecastStatus.BELOW_PACE;
+      return FORECAST_STATUS.BELOW_PACE;
     default:
-      return ForecastStatus.ON_TRACK;
+      return FORECAST_STATUS.ON_TRACK;
   }
 }
 
-function fromPrismaStatus(status: ForecastStatus): UiForecastStatus {
+function fromPrismaStatus(status: PrismaForecastStatus): UiForecastStatus {
   switch (status) {
-    case ForecastStatus.OVER_BUDGET:
+    case FORECAST_STATUS.OVER_BUDGET:
       return "over_budget";
-    case ForecastStatus.WATCH:
+    case FORECAST_STATUS.WATCH:
       return "watch";
-    case ForecastStatus.BELOW_PACE:
+    case FORECAST_STATUS.BELOW_PACE:
       return "below_pace";
     default:
       return "on_track";
@@ -182,20 +198,20 @@ async function persistBudgetAlerts(
     const periodId = periodByBudget.get(item.id);
     if (!periodId) return [];
 
-    const rows: Array<{ budgetId: string; budgetPeriodId: string; type: BudgetAlertType; message: string }> = [];
+    const rows: Array<{ budgetId: string; budgetPeriodId: string; type: PrismaBudgetAlertType; message: string }> = [];
 
     if (item.percentUsed >= 100) {
       rows.push({
         budgetId: item.id,
         budgetPeriodId: periodId,
-        type: BudgetAlertType.THRESHOLD_100,
+        type: BUDGET_ALERT_TYPE.THRESHOLD_100,
         message: `${item.category} reached 100% of budget.`,
       });
     } else if (item.percentUsed >= 80) {
       rows.push({
         budgetId: item.id,
         budgetPeriodId: periodId,
-        type: BudgetAlertType.THRESHOLD_80,
+        type: BUDGET_ALERT_TYPE.THRESHOLD_80,
         message: `${item.category} crossed 80% budget utilization.`,
       });
     }
@@ -204,7 +220,7 @@ async function persistBudgetAlerts(
       rows.push({
         budgetId: item.id,
         budgetPeriodId: periodId,
-        type: BudgetAlertType.PROJECTED_OVER_BUDGET,
+        type: BUDGET_ALERT_TYPE.PROJECTED_OVER_BUDGET,
         message: `${item.category} is projected to exceed budget by month end.`,
       });
     }
@@ -257,9 +273,9 @@ async function mapRecentAlerts(userId: string): Promise<BudgetAlert[]> {
 
   return dbAlerts.map((alert) => {
     const type =
-      alert.type === BudgetAlertType.THRESHOLD_100
+      alert.type === BUDGET_ALERT_TYPE.THRESHOLD_100
         ? "threshold_100"
-        : alert.type === BudgetAlertType.PROJECTED_OVER_BUDGET
+        : alert.type === BUDGET_ALERT_TYPE.PROJECTED_OVER_BUDGET
           ? "projected_over_budget"
           : "threshold_80";
 
