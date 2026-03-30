@@ -1,5 +1,3 @@
-import { CashFlowType, ExportFormat, ExportMode, ExportScope, ExportStatus, TransactionPurpose, TransactionStatus } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/db/prisma";
@@ -16,42 +14,122 @@ import type {
 
 const TRIP_TAG_FILTERS = ["TAG:vacation", "TAG:holiday", "TAG:business trip"];
 
-function toNumber(value: Prisma.Decimal | number | null | undefined): number {
+type DecimalLike = { toString(): string };
+type PrismaCashFlowType = "INCOME" | "EXPENSE" | "TRANSFER" | "REFUND" | "REIMBURSEMENT" | "ADJUSTMENT";
+type PrismaExportFormat = "CSV" | "XLSX" | "PDF";
+type PrismaExportMode = "SUMMARY_ONLY" | "ITEMIZED_ONLY" | "SUMMARY_AND_ITEMIZED";
+type PrismaExportScope = "ALL" | "PERSONAL_ONLY" | "BUSINESS_ONLY" | "TRIP_TAGGED";
+type PrismaExportStatus = "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED";
+type PrismaTransactionPurpose = "PERSONAL" | "BUSINESS" | "SPLIT" | "UNCERTAIN";
+type PrismaTransactionStatus = "PENDING" | "POSTED" | "REMOVED";
+type TransactionWhere = {
+  userId: string;
+  status: { not: PrismaTransactionStatus };
+  cashFlowType: PrismaCashFlowType;
+  purpose?: PrismaTransactionPurpose;
+  date?: {
+    gte?: Date;
+    lte?: Date;
+  };
+  notes?: {
+    some: {
+      note: {
+        in: string[];
+      };
+    };
+  };
+};
+type ExportRunRow = {
+  id: string;
+  format: PrismaExportFormat;
+  mode: PrismaExportMode;
+  scope: PrismaExportScope;
+  status: PrismaExportStatus;
+  rowCount: number | null;
+  totalAmount: DecimalLike | null;
+  errorMessage: string | null;
+  createdAt: Date;
+  completedAt: Date | null;
+};
+type ExportTransactionDbRow = {
+  id: string;
+  date: Date;
+  merchantRaw: string | null;
+  merchantNormalized: string | null;
+  categoryPrimary: string | null;
+  purpose: PrismaTransactionPurpose;
+  amount: DecimalLike | number | null;
+};
+type ExportDownloadRow = {
+  id: string;
+  format: PrismaExportFormat;
+  filePath: string | null;
+  status: PrismaExportStatus;
+};
+
+const CASH_FLOW_TYPE = {
+  EXPENSE: "EXPENSE",
+} as const satisfies Record<string, PrismaCashFlowType>;
+
+const EXPORT_FORMAT = {
+  CSV: "CSV",
+  XLSX: "XLSX",
+  PDF: "PDF",
+} as const satisfies Record<string, PrismaExportFormat>;
+
+const EXPORT_MODE = {
+  SUMMARY_ONLY: "SUMMARY_ONLY",
+  ITEMIZED_ONLY: "ITEMIZED_ONLY",
+  SUMMARY_AND_ITEMIZED: "SUMMARY_AND_ITEMIZED",
+} as const satisfies Record<string, PrismaExportMode>;
+
+const EXPORT_SCOPE = {
+  ALL: "ALL",
+  PERSONAL_ONLY: "PERSONAL_ONLY",
+  BUSINESS_ONLY: "BUSINESS_ONLY",
+  TRIP_TAGGED: "TRIP_TAGGED",
+} as const satisfies Record<string, PrismaExportScope>;
+
+const EXPORT_STATUS = {
+  PROCESSING: "PROCESSING",
+  COMPLETED: "COMPLETED",
+  FAILED: "FAILED",
+} as const satisfies Record<string, PrismaExportStatus>;
+
+const TRANSACTION_PURPOSE = {
+  PERSONAL: "PERSONAL",
+  BUSINESS: "BUSINESS",
+} as const satisfies Record<string, PrismaTransactionPurpose>;
+
+const TRANSACTION_STATUS = {
+  REMOVED: "REMOVED",
+} as const satisfies Record<string, PrismaTransactionStatus>;
+
+function toNumber(value: DecimalLike | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
   return typeof value === "number" ? value : Number(value.toString());
 }
 
-function normalizeScope(scope: UiExportScope): ExportScope {
-  if (scope === "personal_only") return ExportScope.PERSONAL_ONLY;
-  if (scope === "business_only") return ExportScope.BUSINESS_ONLY;
-  if (scope === "trip_tagged") return ExportScope.TRIP_TAGGED;
-  return ExportScope.ALL;
+function normalizeScope(scope: UiExportScope): PrismaExportScope {
+  if (scope === "personal_only") return EXPORT_SCOPE.PERSONAL_ONLY;
+  if (scope === "business_only") return EXPORT_SCOPE.BUSINESS_ONLY;
+  if (scope === "trip_tagged") return EXPORT_SCOPE.TRIP_TAGGED;
+  return EXPORT_SCOPE.ALL;
 }
 
-function normalizeMode(mode: ExportCreatePayload["mode"]): ExportMode {
-  if (mode === "summary_only") return ExportMode.SUMMARY_ONLY;
-  if (mode === "itemized_only") return ExportMode.ITEMIZED_ONLY;
-  return ExportMode.SUMMARY_AND_ITEMIZED;
+function normalizeMode(mode: ExportCreatePayload["mode"]): PrismaExportMode {
+  if (mode === "summary_only") return EXPORT_MODE.SUMMARY_ONLY;
+  if (mode === "itemized_only") return EXPORT_MODE.ITEMIZED_ONLY;
+  return EXPORT_MODE.SUMMARY_AND_ITEMIZED;
 }
 
-function normalizeFormat(format: ExportCreatePayload["format"]): ExportFormat {
-  if (format === "xlsx") return ExportFormat.XLSX;
-  if (format === "pdf") return ExportFormat.PDF;
-  return ExportFormat.CSV;
+function normalizeFormat(format: ExportCreatePayload["format"]): PrismaExportFormat {
+  if (format === "xlsx") return EXPORT_FORMAT.XLSX;
+  if (format === "pdf") return EXPORT_FORMAT.PDF;
+  return EXPORT_FORMAT.CSV;
 }
 
-function mapRun(run: {
-  id: string;
-  format: ExportFormat;
-  mode: ExportMode;
-  scope: ExportScope;
-  status: ExportStatus;
-  rowCount: number | null;
-  totalAmount: Prisma.Decimal | null;
-  errorMessage: string | null;
-  createdAt: Date;
-  completedAt: Date | null;
-}): ExportRunItem {
+function mapRun(run: ExportRunRow): ExportRunItem {
   return {
     id: run.id,
     format: run.format.toLowerCase() as ExportRunItem["format"],
@@ -63,7 +141,7 @@ function mapRun(run: {
     errorMessage: run.errorMessage ?? undefined,
     createdAt: run.createdAt.toISOString(),
     completedAt: run.completedAt?.toISOString(),
-    downloadUrl: run.status === ExportStatus.COMPLETED ? `/api/exports?id=${run.id}&download=1` : undefined,
+    downloadUrl: run.status === EXPORT_STATUS.COMPLETED ? `/api/exports?id=${run.id}&download=1` : undefined,
   };
 }
 
@@ -154,14 +232,14 @@ function buildPdfSummaryText(preview: ExportPreview): string {
 }
 
 async function buildPreview(userId: string, payload: ExportCreatePayload): Promise<ExportPreview> {
-  const where: Prisma.TransactionWhereInput = {
+  const where: TransactionWhere = {
     userId,
-    status: { not: TransactionStatus.REMOVED },
-    cashFlowType: CashFlowType.EXPENSE,
+    status: { not: TRANSACTION_STATUS.REMOVED },
+    cashFlowType: CASH_FLOW_TYPE.EXPENSE,
   };
 
-  if (payload.scope === "personal_only") where.purpose = TransactionPurpose.PERSONAL;
-  if (payload.scope === "business_only") where.purpose = TransactionPurpose.BUSINESS;
+  if (payload.scope === "personal_only") where.purpose = TRANSACTION_PURPOSE.PERSONAL;
+  if (payload.scope === "business_only") where.purpose = TRANSACTION_PURPOSE.BUSINESS;
 
   if (payload.dateFrom || payload.dateTo) {
     where.date = {};
@@ -177,7 +255,7 @@ async function buildPreview(userId: string, payload: ExportCreatePayload): Promi
     };
   }
 
-  const rows = await prisma.transaction.findMany({
+  const rows: ExportTransactionDbRow[] = await prisma.transaction.findMany({
     where,
     select: {
       id: true,
@@ -269,7 +347,7 @@ export async function createExportInPrisma(userId: string, payload: ExportCreate
       scope: normalizeScope(payload.scope),
       periodStart: payload.dateFrom ? new Date(payload.dateFrom) : null,
       periodEnd: payload.dateTo ? new Date(payload.dateTo) : null,
-      status: ExportStatus.PROCESSING,
+      status: EXPORT_STATUS.PROCESSING,
     },
   });
 
@@ -292,7 +370,7 @@ export async function createExportInPrisma(userId: string, payload: ExportCreate
     const updated = await prisma.exportRun.update({
       where: { id: run.id },
       data: {
-        status: ExportStatus.COMPLETED,
+        status: EXPORT_STATUS.COMPLETED,
         filePath,
         rowCount: preview.rowCount,
         totalAmount: preview.itemizedTotal,
@@ -308,7 +386,7 @@ export async function createExportInPrisma(userId: string, payload: ExportCreate
     await prisma.exportRun.update({
       where: { id: run.id },
       data: {
-        status: ExportStatus.FAILED,
+        status: EXPORT_STATUS.FAILED,
         errorMessage: error instanceof Error ? error.message : "Export generation failed.",
       },
     });
@@ -318,19 +396,19 @@ export async function createExportInPrisma(userId: string, payload: ExportCreate
 }
 
 export async function getExportDownload(userId: string, id: string): Promise<{ content: string; filename: string; contentType: string } | null> {
-  const run = await prisma.exportRun.findFirst({
+  const run: ExportDownloadRow | null = await prisma.exportRun.findFirst({
     where: { id, userId },
     select: { id: true, format: true, filePath: true, status: true },
   });
 
-  if (!run || run.status !== ExportStatus.COMPLETED || !run.filePath) return null;
+  if (!run || run.status !== EXPORT_STATUS.COMPLETED || !run.filePath) return null;
 
   const content = await fs.readFile(run.filePath, "utf8");
   const filename = `ledger-export-${run.id}.${run.format.toLowerCase()}`;
   const contentType =
-    run.format === ExportFormat.CSV
+    run.format === EXPORT_FORMAT.CSV
       ? "text/csv; charset=utf-8"
-      : run.format === ExportFormat.XLSX
+      : run.format === EXPORT_FORMAT.XLSX
         ? "application/vnd.ms-excel; charset=utf-8"
         : "text/plain; charset=utf-8";
 
