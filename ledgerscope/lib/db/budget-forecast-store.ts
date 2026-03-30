@@ -15,6 +15,37 @@ const PACE_FACTOR = 0.18;
 type DecimalLike = { toString(): string };
 type PrismaBudgetAlertType = "THRESHOLD_80" | "THRESHOLD_100" | "PROJECTED_OVER_BUDGET";
 type PrismaForecastStatus = "ON_TRACK" | "WATCH" | "OVER_BUDGET" | "BELOW_PACE";
+type BudgetPeriodRow = {
+  actualSpend: DecimalLike | number | null;
+  pendingSpend: DecimalLike | number | null;
+};
+type BudgetRow = {
+  id: string;
+  name: string;
+  amount: DecimalLike | number | null;
+  periods: BudgetPeriodRow[];
+};
+type BudgetPeriodIdRow = {
+  budgetId: string;
+  id: string;
+};
+type RecentBudgetAlertRow = {
+  id: string;
+  type: PrismaBudgetAlertType;
+  message: string | null;
+  triggeredAt: Date;
+  budget: {
+    name: string;
+  };
+};
+type ForecastSnapshotRow = {
+  categoryKey: string | null;
+  budgetAmount: DecimalLike | number | null;
+  actualSpent: DecimalLike | number | null;
+  projectedSpent: DecimalLike | number | null;
+  status: PrismaForecastStatus;
+  explanation: string | null;
+};
 
 const BUDGET_ALERT_TYPE = {
   THRESHOLD_80: "THRESHOLD_80",
@@ -102,7 +133,7 @@ function buildExplanation(category: string, status: UiForecastStatus): string {
 }
 
 async function buildCategorySnapshots(userId: string, periodStart: Date, periodEnd: Date): Promise<BudgetCategorySnapshot[]> {
-  const budgets = await prisma.budget.findMany({
+  const budgets: BudgetRow[] = await prisma.budget.findMany({
     where: { userId, isActive: true },
     include: {
       periods: {
@@ -117,7 +148,7 @@ async function buildCategorySnapshots(userId: string, periodStart: Date, periodE
     orderBy: { name: "asc" },
   });
 
-  return budgets.map((budget) => {
+  return budgets.map((budget: BudgetRow) => {
     const period = budget.periods[0];
     const actualSpent = toNumber(period?.actualSpend);
     const pendingSpent = toNumber(period?.pendingSpend);
@@ -176,12 +207,12 @@ async function persistBudgetAlerts(
   periodEnd: Date,
   categories: BudgetCategorySnapshot[],
 ): Promise<void> {
-  const periods = await prisma.budgetPeriod.findMany({
+  const periods: BudgetPeriodIdRow[] = await prisma.budgetPeriod.findMany({
     where: { userId, periodStart, periodEnd },
     select: { budgetId: true, id: true },
   });
 
-  const periodByBudget = new Map(periods.map((p) => [p.budgetId, p.id]));
+  const periodByBudget = new Map(periods.map((p: BudgetPeriodIdRow) => [p.budgetId, p.id]));
   const budgetIds = categories.map((c) => c.id);
 
   if (budgetIds.length > 0) {
@@ -264,14 +295,14 @@ function buildSummary(categories: BudgetCategorySnapshot[]) {
 }
 
 async function mapRecentAlerts(userId: string): Promise<BudgetAlert[]> {
-  const dbAlerts = await prisma.budgetAlert.findMany({
+  const dbAlerts: RecentBudgetAlertRow[] = await prisma.budgetAlert.findMany({
     where: { userId },
     include: { budget: { select: { name: true } } },
     orderBy: { triggeredAt: "desc" },
     take: 10,
   });
 
-  return dbAlerts.map((alert) => {
+  return dbAlerts.map((alert: RecentBudgetAlertRow) => {
     const type =
       alert.type === BUDGET_ALERT_TYPE.THRESHOLD_100
         ? "threshold_100"
@@ -420,7 +451,7 @@ export async function getForecastOverviewFromPrisma(userId: string): Promise<For
   const periodStart = startOfMonth();
   const periodEnd = endOfMonth();
 
-  const snapshots = await prisma.forecastSnapshot.findMany({
+  const snapshots: ForecastSnapshotRow[] = await prisma.forecastSnapshot.findMany({
     where: { userId, periodStart, periodEnd },
     orderBy: { categoryKey: "asc" },
   });
@@ -435,7 +466,7 @@ export async function getForecastOverviewFromPrisma(userId: string): Promise<For
     totalActual: budgets.summary.totalActual,
     totalProjected: budgets.summary.totalProjected,
     summaries: buildForecastSummaries(budgets.categories, budgets.summary),
-    snapshots: snapshots.map((item) => {
+    snapshots: snapshots.map((item: ForecastSnapshotRow) => {
       const fallbackCategory = titleCaseFromKey(item.categoryKey);
 
       return {
