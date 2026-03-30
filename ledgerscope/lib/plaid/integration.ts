@@ -1,12 +1,3 @@
-import {
-  CashFlowType,
-  ConnectionStatus,
-  ReviewStatus,
-  TransactionDirection,
-  TransactionStatus,
-  TransactionPurpose,
-} from "@prisma/client";
-import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { recomputeSmartInsights } from "@/lib/db/smart-insights-store";
 import { evaluateWatchMatchesForUser } from "@/lib/db/watchlist-store";
@@ -33,6 +24,50 @@ type TransactionsSyncResult = {
   removed: number;
   nextCursorByConnection: Record<string, string>;
 };
+
+type JsonPrimitive = string | number | boolean | null;
+type JsonInputValue = JsonPrimitive | JsonInputValue[] | JsonObject;
+type JsonObject = { [key: string]: JsonInputValue };
+type PrismaCashFlowType =
+  | "INCOME"
+  | "EXPENSE"
+  | "TRANSFER"
+  | "REFUND"
+  | "REIMBURSEMENT"
+  | "ADJUSTMENT";
+type PrismaConnectionStatus = "ACTIVE" | "INACTIVE" | "ERROR";
+type PrismaReviewStatus = "UNREVIEWED" | "REVIEWED" | "NEEDS_REVIEW";
+type PrismaTransactionDirection = "DEBIT" | "CREDIT";
+type PrismaTransactionStatus = "PENDING" | "POSTED" | "REMOVED";
+type PrismaTransactionPurpose = "PERSONAL" | "BUSINESS" | "SPLIT" | "UNCERTAIN";
+
+const CASH_FLOW_TYPE = {
+  INCOME: "INCOME",
+  EXPENSE: "EXPENSE",
+} as const satisfies Record<"INCOME" | "EXPENSE", PrismaCashFlowType>;
+
+const CONNECTION_STATUS = {
+  ACTIVE: "ACTIVE",
+} as const satisfies Record<"ACTIVE", PrismaConnectionStatus>;
+
+const REVIEW_STATUS = {
+  UNREVIEWED: "UNREVIEWED",
+} as const satisfies Record<"UNREVIEWED", PrismaReviewStatus>;
+
+const TRANSACTION_DIRECTION = {
+  DEBIT: "DEBIT",
+  CREDIT: "CREDIT",
+} as const satisfies Record<"DEBIT" | "CREDIT", PrismaTransactionDirection>;
+
+const TRANSACTION_STATUS = {
+  PENDING: "PENDING",
+  POSTED: "POSTED",
+  REMOVED: "REMOVED",
+} as const satisfies Record<"PENDING" | "POSTED" | "REMOVED", PrismaTransactionStatus>;
+
+const TRANSACTION_PURPOSE = {
+  UNCERTAIN: "UNCERTAIN",
+} as const satisfies Record<"UNCERTAIN", PrismaTransactionPurpose>;
 
 function normalizeMerchant(value: string | null | undefined) {
   return value?.trim().toLowerCase().replace(/\s+/g, " ") ?? null;
@@ -115,8 +150,8 @@ async function upsertTransactionFromPlaid(userId: string, bankConnectionId: stri
       });
 
   const category = categoryFromPlaid(tx);
-  const direction = tx.amount >= 0 ? TransactionDirection.DEBIT : TransactionDirection.CREDIT;
-  const cashFlowType = tx.amount >= 0 ? CashFlowType.EXPENSE : CashFlowType.INCOME;
+  const direction = tx.amount >= 0 ? TRANSACTION_DIRECTION.DEBIT : TRANSACTION_DIRECTION.CREDIT;
+  const cashFlowType = tx.amount >= 0 ? CASH_FLOW_TYPE.EXPENSE : CASH_FLOW_TYPE.INCOME;
 
   await prisma.transaction.upsert({
     where: { plaidTransactionId: tx.transaction_id },
@@ -135,9 +170,9 @@ async function upsertTransactionFromPlaid(userId: string, bankConnectionId: stri
       description: tx.name,
       categoryPrimary: category.primary,
       categoryDetailed: category.detailed,
-      purpose: TransactionPurpose.UNCERTAIN,
+      purpose: TRANSACTION_PURPOSE.UNCERTAIN,
       cashFlowType,
-      status: tx.pending ? TransactionStatus.PENDING : TransactionStatus.POSTED,
+      status: tx.pending ? TRANSACTION_STATUS.PENDING : TRANSACTION_STATUS.POSTED,
     },
     create: {
       userId,
@@ -155,10 +190,10 @@ async function upsertTransactionFromPlaid(userId: string, bankConnectionId: stri
       description: tx.name,
       categoryPrimary: category.primary,
       categoryDetailed: category.detailed,
-      purpose: TransactionPurpose.UNCERTAIN,
+      purpose: TRANSACTION_PURPOSE.UNCERTAIN,
       cashFlowType,
-      status: tx.pending ? TransactionStatus.PENDING : TransactionStatus.POSTED,
-      reviewStatus: ReviewStatus.UNREVIEWED,
+      status: tx.pending ? TRANSACTION_STATUS.PENDING : TRANSACTION_STATUS.POSTED,
+      reviewStatus: REVIEW_STATUS.UNREVIEWED,
     },
   });
 }
@@ -187,7 +222,7 @@ export async function exchangePublicTokenForUser(
       institutionId: institutionId ?? null,
       institutionName: institutionName ?? null,
       accessTokenEncrypted,
-      status: ConnectionStatus.ACTIVE,
+      status: CONNECTION_STATUS.ACTIVE,
       updatedAt: new Date(),
     },
     create: {
@@ -196,7 +231,7 @@ export async function exchangePublicTokenForUser(
       institutionId: institutionId ?? null,
       institutionName: institutionName ?? null,
       accessTokenEncrypted,
-      status: ConnectionStatus.ACTIVE,
+      status: CONNECTION_STATUS.ACTIVE,
     },
     select: { id: true },
   });
@@ -213,7 +248,7 @@ export async function syncTransactionsForUser(userId: string, bankConnectionId?:
     where: {
       userId,
       ...(bankConnectionId ? { id: bankConnectionId } : {}),
-      status: ConnectionStatus.ACTIVE,
+      status: CONNECTION_STATUS.ACTIVE,
     },
     select: { id: true, accessTokenEncrypted: true },
   });
@@ -256,7 +291,7 @@ export async function syncTransactionsForUser(userId: string, bankConnectionId?:
     for (const removed of synced.removed) {
       await prisma.transaction.updateMany({
         where: { userId, plaidTransactionId: removed.transaction_id },
-        data: { status: TransactionStatus.REMOVED },
+        data: { status: TRANSACTION_STATUS.REMOVED },
       });
     }
 
@@ -329,7 +364,7 @@ export async function ingestPlaidWebhook(payload: unknown) {
     return { accepted: true, stored: false };
   }
 
-  const normalizedPayload = JSON.parse(JSON.stringify(data)) as Prisma.InputJsonValue;
+  const normalizedPayload = JSON.parse(JSON.stringify(data)) as JsonObject;
 
   await prisma.webhookEvent.create({
     data: {

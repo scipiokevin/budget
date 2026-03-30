@@ -1,5 +1,3 @@
-import { CashFlowType, ReviewStatus, TransactionPurpose as PrismaTransactionPurpose, TransactionStatus as PrismaTransactionStatus } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type {
   DashboardLinkedAccount,
@@ -29,7 +27,111 @@ const ALLOWED_TAGS: ExpenseTag[] = [
   "business trip",
 ];
 
-function toNumber(value: Prisma.Decimal | number | null | undefined): number {
+type DecimalLike = { toString(): string };
+type PrismaCashFlowType =
+  | "INCOME"
+  | "EXPENSE"
+  | "TRANSFER"
+  | "REFUND"
+  | "REIMBURSEMENT"
+  | "ADJUSTMENT";
+type PrismaReviewStatus = "UNREVIEWED" | "REVIEWED" | "NEEDS_REVIEW";
+type PrismaTransactionPurpose = "PERSONAL" | "BUSINESS" | "SPLIT" | "UNCERTAIN";
+type PrismaTransactionStatus = "PENDING" | "POSTED" | "REMOVED";
+
+type StringFilter = {
+  equals?: string;
+  contains?: string;
+  mode?: "insensitive";
+};
+
+type TransactionWhere = {
+  userId: string;
+  status: { not: PrismaTransactionStatus } | PrismaTransactionStatus;
+  OR?: Array<{
+    merchantRaw?: StringFilter;
+    merchantNormalized?: StringFilter;
+    description?: StringFilter;
+  }>;
+  date?: { gte?: Date; lte?: Date };
+  merchantRaw?: StringFilter;
+  categoryPrimary?: StringFilter;
+  bankAccount?: { name: StringFilter };
+  purpose?: PrismaTransactionPurpose;
+  amount?: { gte?: number; lte?: number };
+};
+
+type TransactionDbRow = {
+  id: string;
+  date: Date;
+  merchantRaw: string | null;
+  merchantNormalized: string | null;
+  description: string | null;
+  categoryPrimary: string | null;
+  amount: DecimalLike;
+  purpose: PrismaTransactionPurpose;
+  status: PrismaTransactionStatus;
+  reviewStatus: PrismaReviewStatus;
+  isSuspicious: boolean;
+  bankAccount: { name: string } | null;
+  notes: { note: string }[];
+  splits: {
+    splitMethod: string;
+    personalAmount: DecimalLike;
+    businessAmount: DecimalLike;
+    personalPercent: DecimalLike | null;
+    businessPercent: DecimalLike | null;
+  }[];
+};
+
+type ScopeTransactionRow = {
+  date: Date;
+  amount: DecimalLike;
+  cashFlowType: PrismaCashFlowType;
+  categoryPrimary: string | null;
+  purpose: PrismaTransactionPurpose;
+};
+
+type SummaryRow = {
+  amount: DecimalLike;
+  cashFlowType: PrismaCashFlowType;
+};
+
+type MonthlyAggregate = {
+  income: number;
+  expense: number;
+};
+
+type WeeklyCashflowPoint = {
+  label: string;
+  income: number;
+  expense: number;
+};
+
+const CASH_FLOW_TYPE = {
+  INCOME: "INCOME",
+  EXPENSE: "EXPENSE",
+} as const satisfies Record<"INCOME" | "EXPENSE", PrismaCashFlowType>;
+
+const REVIEW_STATUS = {
+  REVIEWED: "REVIEWED",
+  UNREVIEWED: "UNREVIEWED",
+} as const satisfies Record<"REVIEWED" | "UNREVIEWED", PrismaReviewStatus>;
+
+const TRANSACTION_PURPOSE = {
+  PERSONAL: "PERSONAL",
+  BUSINESS: "BUSINESS",
+  SPLIT: "SPLIT",
+  UNCERTAIN: "UNCERTAIN",
+} as const satisfies Record<"PERSONAL" | "BUSINESS" | "SPLIT" | "UNCERTAIN", PrismaTransactionPurpose>;
+
+const TRANSACTION_STATUS = {
+  PENDING: "PENDING",
+  POSTED: "POSTED",
+  REMOVED: "REMOVED",
+} as const satisfies Record<"PENDING" | "POSTED" | "REMOVED", PrismaTransactionStatus>;
+
+function toNumber(value: DecimalLike | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
   return typeof value === "number" ? value : Number(value.toString());
 }
@@ -63,11 +165,11 @@ function extractCustomTags(notes: { note: string }[]): string[] {
 
 function mapPurposeFromPrisma(value: PrismaTransactionPurpose): TransactionPurpose {
   switch (value) {
-    case PrismaTransactionPurpose.PERSONAL:
+    case TRANSACTION_PURPOSE.PERSONAL:
       return "personal";
-    case PrismaTransactionPurpose.BUSINESS:
+    case TRANSACTION_PURPOSE.BUSINESS:
       return "business";
-    case PrismaTransactionPurpose.SPLIT:
+    case TRANSACTION_PURPOSE.SPLIT:
       return "split";
     default:
       return "uncertain";
@@ -77,50 +179,29 @@ function mapPurposeFromPrisma(value: PrismaTransactionPurpose): TransactionPurpo
 function mapPurposeToPrisma(value: TransactionPurpose): PrismaTransactionPurpose {
   switch (value) {
     case "personal":
-      return PrismaTransactionPurpose.PERSONAL;
+      return TRANSACTION_PURPOSE.PERSONAL;
     case "business":
-      return PrismaTransactionPurpose.BUSINESS;
+      return TRANSACTION_PURPOSE.BUSINESS;
     case "split":
-      return PrismaTransactionPurpose.SPLIT;
+      return TRANSACTION_PURPOSE.SPLIT;
     default:
-      return PrismaTransactionPurpose.UNCERTAIN;
+      return TRANSACTION_PURPOSE.UNCERTAIN;
   }
 }
 
 function mapStatusFromPrisma(value: PrismaTransactionStatus): "pending" | "posted" {
-  return value === PrismaTransactionStatus.PENDING ? "pending" : "posted";
+  return value === TRANSACTION_STATUS.PENDING ? "pending" : "posted";
 }
 
-function mapReviewFromPrisma(value: ReviewStatus): UiReviewStatus {
-  return value === ReviewStatus.REVIEWED ? "reviewed" : "unreviewed";
+function mapReviewFromPrisma(value: PrismaReviewStatus): UiReviewStatus {
+  return value === REVIEW_STATUS.REVIEWED ? "reviewed" : "unreviewed";
 }
 
-function mapReviewToPrisma(value: UiReviewStatus): ReviewStatus {
-  return value === "reviewed" ? ReviewStatus.REVIEWED : ReviewStatus.UNREVIEWED;
+function mapReviewToPrisma(value: UiReviewStatus): PrismaReviewStatus {
+  return value === "reviewed" ? REVIEW_STATUS.REVIEWED : REVIEW_STATUS.UNREVIEWED;
 }
 
-function mapTransactionRecord(tx: {
-  id: string;
-  date: Date;
-  merchantRaw: string | null;
-  merchantNormalized: string | null;
-  description: string | null;
-  categoryPrimary: string | null;
-  amount: Prisma.Decimal;
-  purpose: PrismaTransactionPurpose;
-  status: PrismaTransactionStatus;
-  reviewStatus: ReviewStatus;
-  isSuspicious: boolean;
-  bankAccount: { name: string } | null;
-  notes: { note: string }[];
-  splits: {
-    splitMethod: string;
-    personalAmount: Prisma.Decimal;
-    businessAmount: Prisma.Decimal;
-    personalPercent: Prisma.Decimal | null;
-    businessPercent: Prisma.Decimal | null;
-  }[];
-}): TransactionRecord {
+function mapTransactionRecord(tx: TransactionDbRow): TransactionRecord {
   const split = tx.splits[0];
   const tags = extractTags(tx.notes);
   const customTags = extractCustomTags(tx.notes);
@@ -162,10 +243,10 @@ function endOfMonth(date = new Date()) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0, 23, 59, 59));
 }
 
-function buildWhere(userId: string, query: TransactionsQuery): Prisma.TransactionWhereInput {
-  const where: Prisma.TransactionWhereInput = {
+function buildWhere(userId: string, query: TransactionsQuery): TransactionWhere {
+  const where: TransactionWhere = {
     userId,
-    status: { not: PrismaTransactionStatus.REMOVED },
+    status: { not: TRANSACTION_STATUS.REMOVED },
   };
 
   if (query.search) {
@@ -199,7 +280,7 @@ function buildWhere(userId: string, query: TransactionsQuery): Prisma.Transactio
   }
 
   if (query.status) {
-    where.status = query.status === "pending" ? PrismaTransactionStatus.PENDING : PrismaTransactionStatus.POSTED;
+    where.status = query.status === "pending" ? TRANSACTION_STATUS.PENDING : TRANSACTION_STATUS.POSTED;
   }
 
   if (typeof query.amountMin === "number" || typeof query.amountMax === "number") {
@@ -213,7 +294,7 @@ function buildWhere(userId: string, query: TransactionsQuery): Prisma.Transactio
 
 async function loadFilterOptions(userId: string): Promise<TransactionsFilterOptions> {
   const rows = await prisma.transaction.findMany({
-    where: { userId, status: { not: PrismaTransactionStatus.REMOVED } },
+    where: { userId, status: { not: TRANSACTION_STATUS.REMOVED } },
     select: {
       merchantRaw: true,
       categoryPrimary: true,
@@ -280,7 +361,7 @@ export async function getTransactionsDataFromPrisma(userId: string, query: Trans
 
 export async function getTransactionByIdFromPrisma(userId: string, id: string): Promise<TransactionRecord | null> {
   const tx = await prisma.transaction.findFirst({
-    where: { id, userId, status: { not: PrismaTransactionStatus.REMOVED } },
+    where: { id, userId, status: { not: TRANSACTION_STATUS.REMOVED } },
     include: {
       bankAccount: { select: { name: true } },
       notes: { orderBy: { createdAt: "asc" }, select: { note: true } },
@@ -313,7 +394,7 @@ export async function mutateTransactionInPrisma(userId: string, payload: Transac
       await prisma.transaction.update({ where: { id: payload.id }, data: { purpose: mapPurposeToPrisma(payload.purpose) } });
       break;
     case "split":
-      await prisma.transaction.update({ where: { id: payload.id }, data: { purpose: PrismaTransactionPurpose.SPLIT } });
+      await prisma.transaction.update({ where: { id: payload.id }, data: { purpose: TRANSACTION_PURPOSE.SPLIT } });
       await prisma.transactionSplit.deleteMany({ where: { transactionId: payload.id } });
       await prisma.transactionSplit.create({
         data: {
@@ -415,24 +496,24 @@ export async function getLinkedAccountsFromPrisma(userId: string): Promise<Dashb
 type ScopeKey = "overall" | "personal" | "business";
 
 function rowsForScope(
-  rows: Array<{ date: Date; amount: Prisma.Decimal; cashFlowType: CashFlowType; categoryPrimary: string | null; purpose: PrismaTransactionPurpose }>,
+  rows: ScopeTransactionRow[],
   scope: ScopeKey,
 ) {
   if (scope === "overall") return rows;
-  if (scope === "personal") return rows.filter((row) => row.purpose === PrismaTransactionPurpose.PERSONAL);
-  return rows.filter((row) => row.purpose === PrismaTransactionPurpose.BUSINESS);
+  if (scope === "personal") return rows.filter((row) => row.purpose === TRANSACTION_PURPOSE.PERSONAL);
+  return rows.filter((row) => row.purpose === TRANSACTION_PURPOSE.BUSINESS);
 }
 
 function buildSummaryFromRows(
-  rows: Array<{ amount: Prisma.Decimal; cashFlowType: CashFlowType }>,
+  rows: SummaryRow[],
   budgetUsedPercent: number,
   budgetRemaining: number,
 ): DashboardSummary {
   const totalIncomeThisMonth = rows
-    .filter((row) => row.cashFlowType === CashFlowType.INCOME)
+    .filter((row) => row.cashFlowType === CASH_FLOW_TYPE.INCOME)
     .reduce((sum, row) => sum + toNumber(row.amount), 0);
   const totalExpensesThisMonth = rows
-    .filter((row) => row.cashFlowType === CashFlowType.EXPENSE)
+    .filter((row) => row.cashFlowType === CASH_FLOW_TYPE.EXPENSE)
     .reduce((sum, row) => sum + toNumber(row.amount), 0);
   const netCashFlow = totalIncomeThisMonth - totalExpensesThisMonth;
 
@@ -457,15 +538,15 @@ function buildSummaryFromRows(
 }
 
 function buildMonthlyTrends(
-  rows: Array<{ date: Date; amount: Prisma.Decimal; cashFlowType: CashFlowType }>,
+  rows: ScopeTransactionRow[],
 ): MonthlyTrendPoint[] {
-  const grouped = new Map<string, { income: number; expense: number }>();
+  const grouped = new Map<string, MonthlyAggregate>();
 
   for (const tx of rows) {
     const key = monthKey(tx.date);
-    const current = grouped.get(key) ?? { income: 0, expense: 0 };
-    if (tx.cashFlowType === CashFlowType.INCOME) current.income += toNumber(tx.amount);
-    if (tx.cashFlowType === CashFlowType.EXPENSE) current.expense += toNumber(tx.amount);
+    const current: MonthlyAggregate = grouped.get(key) ?? { income: 0, expense: 0 };
+    if (tx.cashFlowType === CASH_FLOW_TYPE.INCOME) current.income += toNumber(tx.amount);
+    if (tx.cashFlowType === CASH_FLOW_TYPE.EXPENSE) current.expense += toNumber(tx.amount);
     grouped.set(key, current);
   }
 
@@ -533,10 +614,10 @@ export async function getDashboardCashflowSnapshot(userId: string): Promise<{
   const previousFrom = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() - 1, 1, 0, 0, 0));
   const previousTo = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), 0, 23, 59, 59));
 
-  const txs = await prisma.transaction.findMany({
+  const txs: ScopeTransactionRow[] = await prisma.transaction.findMany({
     where: {
       userId,
-      status: { not: PrismaTransactionStatus.REMOVED },
+      status: { not: TRANSACTION_STATUS.REMOVED },
       date: { gte: new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() - 5, 1)), lte: to },
     },
     select: {
@@ -552,12 +633,16 @@ export async function getDashboardCashflowSnapshot(userId: string): Promise<{
   const previousMonth = txs.filter((tx) => tx.date >= previousFrom && tx.date <= previousTo);
   const overallSummary = buildSummaryFromRows(thisMonth, 0, 0);
 
-  const incomeVsExpenses = Array.from({ length: 4 }).map((_, index) => ({ label: `Week ${index + 1}`, income: 0, expense: 0 }));
+  const incomeVsExpenses: WeeklyCashflowPoint[] = Array.from({ length: 4 }, (_, index) => ({
+    label: `Week ${index + 1}`,
+    income: 0,
+    expense: 0,
+  }));
   for (const tx of thisMonth) {
     const day = tx.date.getUTCDate();
     const weekIndex = Math.min(3, Math.floor((day - 1) / 7));
-    if (tx.cashFlowType === CashFlowType.INCOME) incomeVsExpenses[weekIndex].income += toNumber(tx.amount);
-    if (tx.cashFlowType === CashFlowType.EXPENSE) incomeVsExpenses[weekIndex].expense += toNumber(tx.amount);
+    if (tx.cashFlowType === CASH_FLOW_TYPE.INCOME) incomeVsExpenses[weekIndex].income += toNumber(tx.amount);
+    if (tx.cashFlowType === CASH_FLOW_TYPE.EXPENSE) incomeVsExpenses[weekIndex].expense += toNumber(tx.amount);
   }
 
   const monthlyTrends = buildMonthlyTrends(txs);
@@ -565,12 +650,12 @@ export async function getDashboardCashflowSnapshot(userId: string): Promise<{
   const expenseByCategory = new Map<string, number>();
   const previousExpenseByCategory = new Map<string, number>();
   for (const tx of thisMonth) {
-    if (tx.cashFlowType !== CashFlowType.EXPENSE) continue;
+    if (tx.cashFlowType !== CASH_FLOW_TYPE.EXPENSE) continue;
     const category = tx.categoryPrimary ?? "Uncategorized";
     expenseByCategory.set(category, (expenseByCategory.get(category) ?? 0) + toNumber(tx.amount));
   }
   for (const tx of previousMonth) {
-    if (tx.cashFlowType !== CashFlowType.EXPENSE) continue;
+    if (tx.cashFlowType !== CASH_FLOW_TYPE.EXPENSE) continue;
     const category = tx.categoryPrimary ?? "Uncategorized";
     previousExpenseByCategory.set(category, (previousExpenseByCategory.get(category) ?? 0) + toNumber(tx.amount));
   }

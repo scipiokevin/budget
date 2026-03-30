@@ -1,5 +1,3 @@
-import { TransactionStatus, WatchMatchStatus, WatchMatchType } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type {
   WatchCandidateTransaction,
@@ -11,7 +9,27 @@ import type {
   WatchlistMutationResponse,
 } from "@/types/contracts";
 
-function toNumber(value: Prisma.Decimal | number | null | undefined): number {
+type DecimalLike = { toString(): string };
+type PrismaTransactionStatus = "PENDING" | "POSTED" | "REMOVED";
+type PrismaWatchMatchStatus = "NEW" | "ACKNOWLEDGED" | "DISMISSED";
+type PrismaWatchMatchType = "EXACT" | "FUZZY";
+
+const TRANSACTION_STATUS = {
+  REMOVED: "REMOVED",
+} as const satisfies Record<"REMOVED", PrismaTransactionStatus>;
+
+const WATCH_MATCH_STATUS = {
+  NEW: "NEW",
+  ACKNOWLEDGED: "ACKNOWLEDGED",
+  DISMISSED: "DISMISSED",
+} as const satisfies Record<"NEW" | "ACKNOWLEDGED" | "DISMISSED", PrismaWatchMatchStatus>;
+
+const WATCH_MATCH_TYPE = {
+  EXACT: "EXACT",
+  FUZZY: "FUZZY",
+} as const satisfies Record<"EXACT" | "FUZZY", PrismaWatchMatchType>;
+
+function toNumber(value: DecimalLike | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
   return typeof value === "number" ? value : Number(value.toString());
 }
@@ -20,22 +38,22 @@ function normalize(text: string | null | undefined): string {
   return (text ?? "").trim().toLowerCase();
 }
 
-function mapStatus(status: WatchMatchStatus): UiWatchMatchStatus {
-  if (status === WatchMatchStatus.ACKNOWLEDGED) return "acknowledged";
-  if (status === WatchMatchStatus.DISMISSED) return "dismissed";
+function mapStatus(status: PrismaWatchMatchStatus): UiWatchMatchStatus {
+  if (status === WATCH_MATCH_STATUS.ACKNOWLEDGED) return "acknowledged";
+  if (status === WATCH_MATCH_STATUS.DISMISSED) return "dismissed";
   return "new";
 }
 
-function mapMatchType(matchType: WatchMatchType): "exact" | "fuzzy" {
-  return matchType === WatchMatchType.EXACT ? "exact" : "fuzzy";
+function mapMatchType(matchType: PrismaWatchMatchType): "exact" | "fuzzy" {
+  return matchType === WATCH_MATCH_TYPE.EXACT ? "exact" : "fuzzy";
 }
 
-function merchantMatches(pattern: string, merchant: string, matchType: WatchMatchType): boolean {
+function merchantMatches(pattern: string, merchant: string, matchType: PrismaWatchMatchType): boolean {
   const p = normalize(pattern);
   const m = normalize(merchant);
   if (!p || !m) return false;
 
-  if (matchType === WatchMatchType.EXACT) return p === m;
+  if (matchType === WATCH_MATCH_TYPE.EXACT) return p === m;
   return m.includes(p) || p.includes(m);
 }
 
@@ -60,7 +78,7 @@ export async function evaluateWatchMatchesForUser(userId: string): Promise<void>
     prisma.transaction.findMany({
       where: {
         userId,
-        status: { not: TransactionStatus.REMOVED },
+        status: { not: TRANSACTION_STATUS.REMOVED },
       },
       select: {
         id: true,
@@ -89,14 +107,14 @@ export async function evaluateWatchMatchesForUser(userId: string): Promise<void>
           },
         },
         update: {
-          similarityScore: rule.matchType === WatchMatchType.EXACT ? 1 : 0.8,
+          similarityScore: rule.matchType === WATCH_MATCH_TYPE.EXACT ? 1 : 0.8,
         },
         create: {
           userId,
           watchRuleId: rule.id,
           transactionId: tx.id,
-          similarityScore: rule.matchType === WatchMatchType.EXACT ? 1 : 0.8,
-          status: WatchMatchStatus.NEW,
+          similarityScore: rule.matchType === WATCH_MATCH_TYPE.EXACT ? 1 : 0.8,
+          status: WATCH_MATCH_STATUS.NEW,
         },
       });
     }
@@ -128,7 +146,7 @@ export async function getWatchlistDataFromPrisma(userId: string): Promise<Watchl
       take: 40,
     }),
     prisma.transaction.findMany({
-      where: { userId, isSuspicious: true, status: { not: TransactionStatus.REMOVED } },
+      where: { userId, isSuspicious: true, status: { not: TRANSACTION_STATUS.REMOVED } },
       select: {
         id: true,
         date: true,
@@ -211,7 +229,7 @@ export async function mutateWatchlistInPrisma(userId: string, payload: Watchlist
           merchantPattern,
           amountMin: min,
           amountMax: max,
-          matchType: payload.matchType === "exact" ? WatchMatchType.EXACT : WatchMatchType.FUZZY,
+          matchType: payload.matchType === "exact" ? WATCH_MATCH_TYPE.EXACT : WATCH_MATCH_TYPE.FUZZY,
           note: payload.note ?? null,
           isActive: true,
         },
@@ -226,7 +244,7 @@ export async function mutateWatchlistInPrisma(userId: string, payload: Watchlist
           merchantPattern: payload.merchantPattern,
           amountMin: payload.amountMin ?? null,
           amountMax: payload.amountMax ?? null,
-          matchType: payload.matchType === "exact" ? WatchMatchType.EXACT : WatchMatchType.FUZZY,
+          matchType: payload.matchType === "exact" ? WATCH_MATCH_TYPE.EXACT : WATCH_MATCH_TYPE.FUZZY,
           note: payload.note ?? null,
           isActive: true,
         },
@@ -240,7 +258,7 @@ export async function mutateWatchlistInPrisma(userId: string, payload: Watchlist
           merchantPattern: payload.merchantPattern,
           amountMin: payload.amountMin,
           amountMax: payload.amountMax,
-          matchType: payload.matchType ? (payload.matchType === "exact" ? WatchMatchType.EXACT : WatchMatchType.FUZZY) : undefined,
+          matchType: payload.matchType ? (payload.matchType === "exact" ? WATCH_MATCH_TYPE.EXACT : WATCH_MATCH_TYPE.FUZZY) : undefined,
           note: payload.note,
           isActive: payload.isActive,
         },
@@ -251,7 +269,7 @@ export async function mutateWatchlistInPrisma(userId: string, payload: Watchlist
       await prisma.watchMatch.updateMany({
         where: { id: payload.matchId, userId },
         data: {
-          status: payload.status === "acknowledged" ? WatchMatchStatus.ACKNOWLEDGED : WatchMatchStatus.DISMISSED,
+          status: payload.status === "acknowledged" ? WATCH_MATCH_STATUS.ACKNOWLEDGED : WATCH_MATCH_STATUS.DISMISSED,
         },
       });
       break;
@@ -266,7 +284,7 @@ export async function mutateWatchlistInPrisma(userId: string, payload: Watchlist
 
       await prisma.watchMatch.updateMany({
         where: { id: payload.matchId, userId },
-        data: { status: WatchMatchStatus.ACKNOWLEDGED },
+        data: { status: WATCH_MATCH_STATUS.ACKNOWLEDGED },
       });
 
       await prisma.transactionFlag.create({

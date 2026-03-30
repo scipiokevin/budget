@@ -23,6 +23,11 @@ type Transaction = {
   category: string;
   amount: number;
 };
+type RecurringCandidate = {
+  merchant: string;
+  dates: Date[];
+  amounts: number[];
+};
 type PrismaCashFlowType =
   | "INCOME"
   | "EXPENSE"
@@ -195,12 +200,16 @@ export async function getInsightsDataFromPrisma(userId: string): Promise<Insight
     grouped.set(tripId, current);
   }
 
-  const recurringCandidatesMap = new Map<string, { merchant: string; dates: Date[]; amounts: number[] }>();
+  const recurringCandidatesMap = new Map<string, RecurringCandidate>();
 
   for (const row of rows) {
     const merchant = row.merchantRaw ?? row.merchantNormalized ?? "Unknown merchant";
     const amount = toNumber(row.amount);
-    const current = recurringCandidatesMap.get(merchant) ?? { merchant, dates: [], amounts: [] };
+    const current: RecurringCandidate = recurringCandidatesMap.get(merchant) ?? {
+      merchant,
+      dates: [],
+      amounts: [],
+    };
     current.dates.push(row.date);
     current.amounts.push(amount);
     recurringCandidatesMap.set(merchant, current);

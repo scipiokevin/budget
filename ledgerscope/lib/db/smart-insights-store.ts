@@ -11,6 +11,19 @@ type GeneratedInsight = {
   severity: SmartInsightSeverity;
   metricValue?: number;
 };
+type CategorySpendRow = {
+  category: string;
+  amount: number;
+};
+type MerchantSpendAggregate = {
+  amount: number;
+  count: number;
+};
+type RepeatChargeCandidate = {
+  merchant: string;
+  amount: number;
+  count: number;
+};
 
 type DecimalLike = { toString(): string };
 type PrismaCashFlowType =
@@ -163,7 +176,7 @@ function buildBudgetWarning(budgetCategory: {
     metricValue: 0,
   };
 }
-function buildMoMInsight(currentExpenseRows: Array<{ category: string; amount: number }>, previousExpenseRows: Array<{ category: string; amount: number }>): GeneratedInsight {
+function buildMoMInsight(currentExpenseRows: CategorySpendRow[], previousExpenseRows: CategorySpendRow[]): GeneratedInsight {
   const previousByCategory = new Map<string, number>();
   for (const row of previousExpenseRows) {
     previousByCategory.set(row.category, (previousByCategory.get(row.category) ?? 0) + row.amount);
@@ -209,7 +222,7 @@ function buildMoMInsight(currentExpenseRows: Array<{ category: string; amount: n
   };
 }
 
-function buildSavingsOpportunity(expenseRows: Array<{ merchant: string; amount: number; count: number }>): GeneratedInsight {
+function buildSavingsOpportunity(expenseRows: RepeatChargeCandidate[]): GeneratedInsight {
   const candidate = expenseRows.sort((a, b) => b.amount - a.amount)[0];
 
   if (!candidate || candidate.count < 2) {
@@ -232,7 +245,7 @@ function buildSavingsOpportunity(expenseRows: Array<{ merchant: string; amount: 
   };
 }
 
-function buildSubscriptionCandidate(expenseRows: Array<{ merchant: string; amount: number; count: number }>): GeneratedInsight {
+function buildSubscriptionCandidate(expenseRows: RepeatChargeCandidate[]): GeneratedInsight {
   const candidate = expenseRows
     .filter((row) => row.count >= 2)
     .sort((a, b) => b.count - a.count || b.amount - a.amount)[0];
@@ -330,11 +343,11 @@ export async function recomputeSmartInsights(userId: string): Promise<void> {
     .filter((row) => row.cashFlowType === CASH_FLOW_TYPE.EXPENSE)
     .map((row) => ({ category: row.categoryPrimary ?? "Uncategorized", amount: toNumber(row.amount) }));
 
-  const currentExpenseByMerchantMap = new Map<string, { amount: number; count: number }>();
+  const currentExpenseByMerchantMap = new Map<string, MerchantSpendAggregate>();
   for (const row of currentRows) {
     if (row.cashFlowType !== CASH_FLOW_TYPE.EXPENSE) continue;
     const merchant = row.merchantRaw ?? "Unknown merchant";
-    const current = currentExpenseByMerchantMap.get(merchant) ?? { amount: 0, count: 0 };
+    const current: MerchantSpendAggregate = currentExpenseByMerchantMap.get(merchant) ?? { amount: 0, count: 0 };
     current.amount += toNumber(row.amount);
     current.count += 1;
     currentExpenseByMerchantMap.set(merchant, current);
@@ -355,21 +368,21 @@ export async function recomputeSmartInsights(userId: string): Promise<void> {
     },
   });
 
-  const repeatMap = new Map<string, { merchant: string; amount: number; count: number }>();
-  const flaggedMerchantMap = new Map<string, { merchant: string; amount: number; count: number }>();
+  const repeatMap = new Map<string, RepeatChargeCandidate>();
+  const flaggedMerchantMap = new Map<string, RepeatChargeCandidate>();
 
   for (const row of repeatRows) {
     const merchant = row.merchantRaw ?? "Unknown merchant";
     const amount = Number(toNumber(row.amount).toFixed(2));
 
     const duplicateKey = `${merchant.toLowerCase()}|${amount}`;
-    const duplicateCurrent = repeatMap.get(duplicateKey) ?? { merchant, amount, count: 0 };
+    const duplicateCurrent: RepeatChargeCandidate = repeatMap.get(duplicateKey) ?? { merchant, amount, count: 0 };
     duplicateCurrent.count += 1;
     repeatMap.set(duplicateKey, duplicateCurrent);
 
     if (row.isSuspicious) {
       const flaggedKey = merchant.toLowerCase();
-      const flaggedCurrent = flaggedMerchantMap.get(flaggedKey) ?? { merchant, amount, count: 0 };
+      const flaggedCurrent: RepeatChargeCandidate = flaggedMerchantMap.get(flaggedKey) ?? { merchant, amount, count: 0 };
       flaggedCurrent.count += 1;
       flaggedMerchantMap.set(flaggedKey, flaggedCurrent);
     }
@@ -410,7 +423,7 @@ export async function recomputeSmartInsights(userId: string): Promise<void> {
         severity: "info",
       };
 
-  const merchantRows = [...currentExpenseByMerchantMap.entries()].map(([merchant, value]) => ({
+  const merchantRows: RepeatChargeCandidate[] = [...currentExpenseByMerchantMap.entries()].map(([merchant, value]) => ({
     merchant,
     amount: Number(value.amount.toFixed(2)),
     count: value.count,
