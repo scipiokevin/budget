@@ -1,4 +1,3 @@
-import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type {
   BudgetAlert,
@@ -13,6 +12,7 @@ import type {
 
 const PACE_FACTOR = 0.18;
 
+type DecimalLike = { toString(): string };
 type PrismaBudgetAlertType = "THRESHOLD_80" | "THRESHOLD_100" | "PROJECTED_OVER_BUDGET";
 type PrismaForecastStatus = "ON_TRACK" | "WATCH" | "OVER_BUDGET" | "BELOW_PACE";
 
@@ -29,7 +29,7 @@ const FORECAST_STATUS = {
   BELOW_PACE: "BELOW_PACE",
 } as const satisfies Record<string, PrismaForecastStatus>;
 
-function toNumber(value: Prisma.Decimal | number | null | undefined): number {
+function toNumber(value: DecimalLike | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
   return typeof value === "number" ? value : Number(value.toString());
 }
