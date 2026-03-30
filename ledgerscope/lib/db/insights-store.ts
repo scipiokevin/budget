@@ -8,7 +8,6 @@ import type {
   TripCategoryBreakdown,
   TripProjection,
   TripSummary,
-  TripTransactionItem,
 } from "@/types/contracts";
 
 const TRIP_TAGS: ExpenseTag[] = ["vacation", "holiday", "business trip"];
@@ -17,6 +16,13 @@ const CUSTOM_TAG_PREFIX = "CUSTOM_TAG:";
 const TRIP_ASSIGN_PREFIX = "trip:";
 
 type DecimalLike = { toString(): string };
+type Transaction = {
+  id: string;
+  date: string;
+  merchant: string;
+  category: string;
+  amount: number;
+};
 type PrismaCashFlowType =
   | "INCOME"
   | "EXPENSE"
@@ -121,14 +127,16 @@ function monthlyFactor(frequency: Frequency) {
   if (frequency === "biweekly") return 2.17;
   if (frequency === "monthly") return 1;
   return 1;
-}type GroupedTrip = {
+}
+
+type GroupedTrip = {
   tripId: string;
   tripType: "vacation" | "holiday" | "business trip";
   start: Date;
   end: Date;
   total: number;
   categoryMap: Map<string, number>;
-  transactions: TripTransactionItem[];
+  transactions: Transaction[];
 };
 
 export async function getInsightsDataFromPrisma(userId: string): Promise<InsightsData> {
@@ -164,8 +172,8 @@ export async function getInsightsDataFromPrisma(userId: string): Promise<Insight
       end: row.date,
       total: 0,
       categoryMap: new Map<string, number>(),
-      transactions: [],
-    };
+      transactions: [] as Transaction[],
+    } satisfies GroupedTrip;
 
     if (row.date < current.start) current.start = row.date;
     if (row.date > current.end) current.end = row.date;
@@ -177,12 +185,12 @@ export async function getInsightsDataFromPrisma(userId: string): Promise<Insight
     current.categoryMap.set(category, (current.categoryMap.get(category) ?? 0) + amount);
 
     current.transactions.push({
-      id: row.id,
-      date: row.date.toISOString().slice(0, 10),
-      merchant: row.merchantRaw ?? row.merchantNormalized ?? "Unknown merchant",
-      category,
-      amount: Number(amount.toFixed(2)),
-    });
+      id: String(row.id),
+      date: new Date(row.date).toISOString().slice(0, 10),
+      merchant: String(row.merchantRaw ?? row.merchantNormalized ?? "Unknown merchant"),
+      category: String(category),
+      amount: Number(amount),
+    } as Transaction);
 
     grouped.set(tripId, current);
   }
