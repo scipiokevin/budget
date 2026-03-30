@@ -1,18 +1,35 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { auth } from "@/auth";
-import { prisma } from "@/lib/db/prisma";
+
+async function resolveAuthenticatedDestination(): Promise<string | null> {
+  try {
+    const [{ auth }, { prisma }] = await Promise.all([import("@/auth"), import("@/lib/db/prisma")]);
+    const session = await auth();
+
+    if (!session?.user?.id) {
+      return null;
+    }
+
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { onboardingCompletedAt: true },
+      });
+
+      return user?.onboardingCompletedAt ? "/dashboard" : "/onboarding";
+    } catch {
+      return "/dashboard";
+    }
+  } catch {
+    return null;
+  }
+}
 
 export default async function Home() {
-  const session = await auth();
+  const destination = await resolveAuthenticatedDestination();
 
-  if (session?.user?.id) {
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { onboardingCompletedAt: true },
-    });
-
-    redirect(user?.onboardingCompletedAt ? "/dashboard" : "/onboarding");
+  if (destination) {
+    redirect(destination);
   }
 
   return (
