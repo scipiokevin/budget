@@ -9,6 +9,10 @@ const credentialsSchema = z.object({
   password: z.string().min(8),
 });
 
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
   pages: {
@@ -25,7 +29,8 @@ export const authOptions: NextAuthOptions = {
         const parsed = credentialsSchema.safeParse(credentials);
         if (!parsed.success) return null;
 
-        const { email, password } = parsed.data;
+        const { password } = parsed.data;
+        const email = normalizeEmail(parsed.data.email);
         const user = await prisma.user.findUnique({
           where: { email },
           select: {

@@ -13,6 +13,16 @@ const signupSchema = z.object({
 
 const DB_TIMEOUT_MS = 8000;
 
+type PrismaErrorWithCode = Error & { code?: string };
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function hasPrismaErrorCode(error: unknown): error is PrismaErrorWithCode {
+  return error instanceof Error && "code" in error;
+}
+
 function timeoutResponse(message: string) {
   return NextResponse.json<AppApiError>(
     {
@@ -41,7 +51,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { name, email, password } = parsed.data;
+    const { name, password } = parsed.data;
+    const email = normalizeEmail(parsed.data.email);
 
     const existing = await withTimeout(
       prisma.user.findUnique({ where: { email }, select: { id: true } }),
@@ -58,7 +69,7 @@ export async function POST(request: NextRequest) {
 
     const passwordHash = await withTimeout(hash(password, 12), DB_TIMEOUT_MS, "Password hashing timed out.");
 
-    await withTimeout(
+    const createdUser = await withTimeout(
       prisma.user.create({
         data: {
           name: name ?? null,
@@ -66,10 +77,22 @@ export async function POST(request: NextRequest) {
           passwordHash,
           onboardingCompletedAt: null,
         },
+        select: { id: true, email: true },
       }),
       DB_TIMEOUT_MS,
       "Creating user timed out.",
     );
+
+    if (!createdUser?.id) {
+      return NextResponse.json<AppApiError>(
+        {
+          error: "Account could not be created.",
+          code: "SERVER_ERROR",
+          details: "User creation did not return a valid record.",
+        },
+        { status: 500 },
+      );
+    }
 
     return NextResponse.json({ success: true }, { status: 201 });
   } catch (error) {
@@ -84,6 +107,22 @@ export async function POST(request: NextRequest) {
       return timeoutResponse(error.message);
     }
 
-    return NextResponse.json<AppApiError>({ error: "Failed to create user.", code: "SERVER_ERROR" }, { status: 500 });
+    if (hasPrismaErrorCode(error) && error.code === "P2002") {
+      return NextResponse.json<AppApiError>(
+        { error: "Email is already registered.", code: "CONFLICT" },
+        { status: 409 },
+      );
+    }
+
+    console.error("Signup failed", error);
+
+    return NextResponse.json<AppApiError>(
+      {
+        error: "Failed to create user.",
+        code: "SERVER_ERROR",
+        details: "Signup is temporarily unavailable. Please try again.",
+      },
+      { status: 500 },
+    );
   }
 }
