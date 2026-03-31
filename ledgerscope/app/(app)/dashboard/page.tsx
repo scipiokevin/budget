@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CategorySpendingComparisonChart } from "@/components/charts/category-spending-comparison-chart";
 import { MonthlyCashflowChart } from "@/components/charts/monthly-cashflow-chart";
@@ -17,7 +17,7 @@ import { WidgetCard } from "@/components/ui/widget-card";
 import { useApiData } from "@/lib/hooks/use-api-data";
 import { appApi } from "@/lib/services/app-api-client";
 import { formatCurrency, formatCurrencyAmount } from "@/lib/utils/format";
-import type { DashboardScope } from "@/types/contracts";
+import type { DashboardScope, SmartInsightCard } from "@/types/contracts";
 
 const SCOPE_OPTIONS: Array<{ value: DashboardScope; label: string }> = [
   { value: "overall", label: "Overall" },
@@ -37,6 +37,13 @@ export default function DashboardPage() {
   const [currentActionLabel, setCurrentActionLabel] = useState<string | null>(null);
   const [topActionError, setTopActionError] = useState<string | null>(null);
   const [accountActionId, setAccountActionId] = useState<string | null>(null);
+  const [dismissError, setDismissError] = useState<string | null>(null);
+  const [dismissingInsightId, setDismissingInsightId] = useState<string | null>(null);
+  const [visibleInsights, setVisibleInsights] = useState<SmartInsightCard[]>([]);
+
+  useEffect(() => {
+    setVisibleInsights(Array.isArray(data?.smartInsights) ? data.smartInsights : []);
+  }, [data?.smartInsights]);
 
   if (loading) {
     return (
@@ -125,6 +132,26 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleDismissInsight(insightId: string) {
+    const previousInsights = visibleInsights;
+    setDismissError(null);
+    setDismissingInsightId(insightId);
+    setVisibleInsights((current) => current.filter((insight) => insight.id !== insightId));
+
+    try {
+      await appApi.dismissSmartInsight(insightId);
+      pushToast({ title: "Insight dismissed", message: "This insight has been removed from your dashboard.", variant: "success" });
+      await reload();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to dismiss insight.";
+      setDismissError(message);
+      setVisibleInsights(previousInsights);
+      pushToast({ title: "Dismiss failed", message, variant: "error" });
+    } finally {
+      setDismissingInsightId(null);
+    }
+  }
+
   function statusClasses(status: "active" | "inactive" | "error", requiresReconnect: boolean) {
     if (requiresReconnect || status === "error") {
       return "border-rose-200 bg-rose-50 text-rose-700";
@@ -150,6 +177,7 @@ export default function DashboardPage() {
     >
       {topActionLoading ? <LoadingState label="Running action..." /> : null}
       {topActionError ? <ErrorState message={topActionError} /> : null}
+      {dismissError ? <ErrorState message={dismissError} /> : null}
       <ConnectBankPanel ref={connectPanelRef} compact />
 
       {isEmpty ? (
@@ -194,12 +222,16 @@ export default function DashboardPage() {
 
           <section className="grid gap-4 xl:grid-cols-4">
             <WidgetCard title="Smart insights" description="Plain-English guidance from synced data.">
-              {data.smartInsights.length === 0 ? (
+              {visibleInsights.length === 0 ? (
                 <p className="text-sm text-slate-500">No active insights.</p>
               ) : (
                 <div className="space-y-2">
-                  {data.smartInsights.map((insight) => (
-                    <SmartInsightItemCard key={insight.id} insight={insight} onDismiss={() => {}} />
+                  {visibleInsights.map((insight) => (
+                    <SmartInsightItemCard
+                      key={insight.id}
+                      insight={insight}
+                      onDismiss={dismissingInsightId ? undefined : (id) => void handleDismissInsight(id)}
+                    />
                   ))}
                 </div>
               )}
