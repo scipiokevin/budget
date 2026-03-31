@@ -30,6 +30,10 @@ function hasPrismaErrorCode(error: unknown): error is PrismaErrorWithCode {
   return error instanceof Error && "code" in error;
 }
 
+function isSchemaMismatchError(error: unknown): error is PrismaErrorWithCode {
+  return hasPrismaErrorCode(error) && (error.code === "P2021" || error.code === "P2022");
+}
+
 function logSignupInfo(context: SignupLogContext) {
   console.info("[signup]", context);
 }
@@ -183,6 +187,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json<AppApiError>(
         { error: "Email is already registered.", code: "CONFLICT" },
         { status: 409 },
+      );
+    }
+
+    if (isSchemaMismatchError(error)) {
+      logSignupError(
+        {
+          requestId,
+          stage: "prisma_schema_mismatch",
+          code: error.code,
+          details: {
+            hint: "Production database may be behind the current Prisma schema. Ensure prisma migrate deploy runs during deployment.",
+          },
+        },
+        error,
+      );
+
+      return NextResponse.json<AppApiError>(
+        {
+          error: "Signup is temporarily unavailable.",
+          code: "SERVER_ERROR",
+          details: "Database schema is not up to date. Please try again shortly.",
+        },
+        { status: 500 },
       );
     }
 
