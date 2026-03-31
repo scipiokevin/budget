@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "@/lib/db/prisma";
+import { PDFDocument, StandardFonts } from "pdf-lib";
+import * as XLSX from "xlsx";
 import type {
   ExportCreatePayload,
   ExportCreateResponse,
@@ -65,6 +67,12 @@ type ExportDownloadRow = {
   format: PrismaExportFormat;
   filePath: string | null;
   status: PrismaExportStatus;
+};
+
+type ExportFile = {
+  buffer: Buffer;
+  filename: string;
+  contentType: string;
 };
 
 const CASH_FLOW_TYPE = {
@@ -163,6 +171,14 @@ function csvEscape(value: string): string {
   return value;
 }
 
+function logExport(stage: string, detail: Record<string, unknown>) {
+  console.info("[exports]", JSON.stringify({ stage, timestamp: new Date().toISOString(), ...detail }));
+}
+
+function logExportError(stage: string, detail: Record<string, unknown>) {
+  console.error("[exports]", JSON.stringify({ stage, timestamp: new Date().toISOString(), ...detail }));
+}
+
 function buildCsv(preview: ExportPreview): string {
   const lines: string[] = [];
   lines.push("Summary Total,Itemized Total,Reconciled,Row Count");
@@ -201,34 +217,98 @@ function buildCsv(preview: ExportPreview): string {
   return lines.join("\n");
 }
 
-function buildExcelCompatibleTsv(preview: ExportPreview): string {
-  const lines: string[] = [];
-  lines.push("Date\tMerchant\tCategory\tPurpose\tAmount");
-  for (const row of preview.itemized) {
-    lines.push([row.date, row.merchant, row.category, row.purpose, row.amount.toFixed(2)].join("\t"));
-  }
-  lines.push("");
-  lines.push(`Summary Total\t${preview.summaryTotal.toFixed(2)}`);
-  lines.push(`Itemized Total\t${preview.itemizedTotal.toFixed(2)}`);
-  lines.push(`Reconciled\t${preview.reconciled}`);
-  return lines.join("\n");
+function buildXlsx(preview: ExportPreview): Buffer {
+  const workbook = XLSX.utils.book_new();
+
+  const itemizedSheet = XLSX.utils.json_to_sheet(
+    preview.itemized.map((row) => ({
+      Date: row.date,
+      Merchant: row.merchant,
+      Category: row.category,
+      Purpose: row.purpose,
+      Amount: row.amount,
+    })),
+  );
+
+  const summarySheet = XLSX.utils.aoa_to_sheet([
+    ["Metric", "Value"],
+    ["Summary Total", preview.summaryTotal],
+    ["Itemized Total", preview.itemizedTotal],
+    ["Reconciled", preview.reconciled ? "Yes" : "No"],
+    ["Row Count", preview.rowCount],
+  ]);
+
+  const categorySheet = XLSX.utils.json_to_sheet(
+    preview.categoryRollups.map((row) => ({
+      Category: row.key,
+      Amount: row.amount,
+      Count: row.count,
+    })),
+  );
+
+  const merchantSheet = XLSX.utils.json_to_sheet(
+    preview.merchantRollups.map((row) => ({
+      Merchant: row.key,
+      Amount: row.amount,
+      Count: row.count,
+    })),
+  );
+
+  const monthlySheet = XLSX.utils.json_to_sheet(
+    preview.monthlyRollups.map((row) => ({
+      Month: row.key,
+      Amount: row.amount,
+      Count: row.count,
+    })),
+  );
+
+  XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+  XLSX.utils.book_append_sheet(workbook, itemizedSheet, "Itemized");
+  XLSX.utils.book_append_sheet(workbook, categorySheet, "Categories");
+  XLSX.utils.book_append_sheet(workbook, merchantSheet, "Merchants");
+  XLSX.utils.book_append_sheet(workbook, monthlySheet, "Monthly");
+
+  return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
 }
 
-function buildPdfSummaryText(preview: ExportPreview): string {
-  const lines: string[] = [];
-  lines.push("LedgerScope Export Summary Report");
-  lines.push("");
-  lines.push(`Summary total: $${preview.summaryTotal.toFixed(2)}`);
-  lines.push(`Itemized total: $${preview.itemizedTotal.toFixed(2)}`);
-  lines.push(`Reconciled: ${preview.reconciled}`);
-  lines.push(`Rows: ${preview.rowCount}`);
-  lines.push("");
-  lines.push("Top Category Rollups:");
-  preview.categoryRollups.slice(0, 8).forEach((row) => lines.push(`- ${row.key}: $${row.amount.toFixed(2)} (${row.count})`));
-  lines.push("");
-  lines.push("Top Merchant Rollups:");
-  preview.merchantRollups.slice(0, 8).forEach((row) => lines.push(`- ${row.key}: $${row.amount.toFixed(2)} (${row.count})`));
-  return lines.join("\n");
+async function buildPdf(preview: ExportPreview): Promise<Uint8Array> {
+  const document = await PDFDocument.create();
+  const page = document.addPage([612, 792]);
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const boldFont = await document.embedFont(StandardFonts.HelveticaBold);
+
+  let y = 750;
+  const left = 48;
+
+  function drawLine(text: string, options?: { bold?: boolean; size?: number }) {
+    const size = options?.size ?? 11;
+    page.drawText(text, {
+      x: left,
+      y,
+      size,
+      font: options?.bold ? boldFont : font,
+    });
+    y -= size + 8;
+  }
+
+  drawLine("LedgerScope Export Summary Report", { bold: true, size: 18 });
+  y -= 4;
+  drawLine(`Summary total: $${preview.summaryTotal.toFixed(2)}`);
+  drawLine(`Itemized total: $${preview.itemizedTotal.toFixed(2)}`);
+  drawLine(`Reconciled: ${preview.reconciled ? "Yes" : "No"}`);
+  drawLine(`Row count: ${preview.rowCount}`);
+  y -= 6;
+  drawLine("Top Category Rollups", { bold: true });
+  preview.categoryRollups.slice(0, 8).forEach((row) => {
+    drawLine(`- ${row.key}: $${row.amount.toFixed(2)} (${row.count})`);
+  });
+  y -= 6;
+  drawLine("Top Merchant Rollups", { bold: true });
+  preview.merchantRollups.slice(0, 8).forEach((row) => {
+    drawLine(`- ${row.key}: $${row.amount.toFixed(2)} (${row.count})`);
+  });
+
+  return document.save();
 }
 
 async function buildPreview(userId: string, payload: ExportCreatePayload): Promise<ExportPreview> {
@@ -339,6 +419,15 @@ export async function getExportsDataFromPrisma(userId: string): Promise<ExportsD
 }
 
 export async function createExportInPrisma(userId: string, payload: ExportCreatePayload): Promise<ExportCreateResponse> {
+  logExport("create.start", {
+    userId,
+    format: payload.format,
+    mode: payload.mode,
+    scope: payload.scope,
+    dateFrom: payload.dateFrom ?? undefined,
+    dateTo: payload.dateTo ?? undefined,
+  });
+
   const run = await prisma.exportRun.create({
     data: {
       userId,
@@ -358,14 +447,13 @@ export async function createExportInPrisma(userId: string, payload: ExportCreate
     await fs.mkdir(exportDir, { recursive: true });
     const filePath = path.join(exportDir, `${run.id}.${ext}`);
 
-    const content =
-      payload.format === "csv"
-        ? buildCsv(preview)
-        : payload.format === "xlsx"
-          ? buildExcelCompatibleTsv(preview)
-          : buildPdfSummaryText(preview);
-
-    await fs.writeFile(filePath, content, "utf8");
+    if (payload.format === "csv") {
+      await fs.writeFile(filePath, buildCsv(preview), "utf8");
+    } else if (payload.format === "xlsx") {
+      await fs.writeFile(filePath, buildXlsx(preview));
+    } else {
+      await fs.writeFile(filePath, await buildPdf(preview));
+    }
 
     const updated = await prisma.exportRun.update({
       where: { id: run.id },
@@ -378,11 +466,27 @@ export async function createExportInPrisma(userId: string, payload: ExportCreate
       },
     });
 
+    logExport("create.complete", {
+      userId,
+      exportRunId: run.id,
+      format: payload.format,
+      rows: preview.rowCount,
+      totalAmount: preview.itemizedTotal,
+      filePath,
+    });
+
     return {
       run: mapRun(updated),
       preview,
     };
   } catch (error) {
+    logExportError("create.error", {
+      userId,
+      exportRunId: run.id,
+      format: payload.format,
+      error: error instanceof Error ? error.message : "Unknown export generation error.",
+    });
+
     await prisma.exportRun.update({
       where: { id: run.id },
       data: {
@@ -395,7 +499,7 @@ export async function createExportInPrisma(userId: string, payload: ExportCreate
   }
 }
 
-export async function getExportDownload(userId: string, id: string): Promise<{ content: string; filename: string; contentType: string } | null> {
+export async function getExportDownload(userId: string, id: string): Promise<ExportFile | null> {
   const run: ExportDownloadRow | null = await prisma.exportRun.findFirst({
     where: { id, userId },
     select: { id: true, format: true, filePath: true, status: true },
@@ -403,14 +507,20 @@ export async function getExportDownload(userId: string, id: string): Promise<{ c
 
   if (!run || run.status !== EXPORT_STATUS.COMPLETED || !run.filePath) return null;
 
-  const content = await fs.readFile(run.filePath, "utf8");
+  logExport("download.start", {
+    userId,
+    exportRunId: run.id,
+    format: run.format,
+  });
+
+  const content = await fs.readFile(run.filePath);
   const filename = `ledger-export-${run.id}.${run.format.toLowerCase()}`;
   const contentType =
     run.format === EXPORT_FORMAT.CSV
       ? "text/csv; charset=utf-8"
       : run.format === EXPORT_FORMAT.XLSX
-        ? "application/vnd.ms-excel; charset=utf-8"
-        : "text/plain; charset=utf-8";
+        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        : "application/pdf";
 
-  return { content, filename, contentType };
+  return { buffer: content, filename, contentType };
 }

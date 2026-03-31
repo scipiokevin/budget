@@ -15,12 +15,15 @@ export async function GET(request: NextRequest) {
     if (id && download === "1") {
       const file = await getExportDownload(userId, id);
       if (!file) return NextResponse.json({ error: "Export not found." }, { status: 404 });
+      const body = new Blob([Uint8Array.from(file.buffer)], { type: file.contentType });
 
-      return new NextResponse(file.content, {
+      return new NextResponse(body, {
         status: 200,
         headers: {
           "Content-Type": file.contentType,
           "Content-Disposition": `attachment; filename="${file.filename}"`,
+          "Content-Length": String(file.buffer.byteLength),
+          "Cache-Control": "private, no-store, max-age=0",
         },
       });
     }
@@ -28,7 +31,8 @@ export async function GET(request: NextRequest) {
     const service = getAppDataService();
     const data = await service.getExports(userId);
     return NextResponse.json(data);
-  } catch {
+  } catch (error) {
+    console.error("[exports] get route failed", error);
     return NextResponse.json({ error: "Failed to load exports." }, { status: 500 });
   }
 }
@@ -43,6 +47,7 @@ export async function POST(request: NextRequest) {
     const data = await service.createExport(userId, payload);
     return NextResponse.json(data);
   } catch (error) {
+    console.error("[exports] post route failed", error);
     const message = error instanceof Error ? error.message : "Failed to create export.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
