@@ -79,6 +79,7 @@ const dashboardMeta = {
   selectedRange: "This month",
   actions: [
     { label: "Connect Bank", variant: "primary" as const },
+    { label: "Sync Accounts", variant: "secondary" as const },
     { label: "Export Snapshot", variant: "secondary" as const },
   ],
   nextExpectedPaycheck: {

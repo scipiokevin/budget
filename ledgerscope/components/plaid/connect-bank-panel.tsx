@@ -16,7 +16,7 @@ type ConnectBankPanelProps = {
 };
 
 export type ConnectBankPanelHandle = {
-  connect: () => Promise<void>;
+  connect: (targetBankConnectionId?: string) => Promise<void>;
 };
 
 type PlaidCreateOptions = {
@@ -126,7 +126,7 @@ export const ConnectBankPanel = forwardRef<ConnectBankPanelHandle, ConnectBankPa
     setStatus(`Connection healthy. ${syncData.added} new, ${syncData.modified} updated, ${syncData.removed} removed.`);
   }
 
-  async function runSandboxFallback() {
+  async function runSandboxFallback(targetBankConnectionId?: string) {
     setStatus("Using sandbox fallback...");
 
     const sandboxRes = await fetch("/api/plaid/sandbox/public-token", {
@@ -148,7 +148,7 @@ export const ConnectBankPanel = forwardRef<ConnectBankPanelHandle, ConnectBankPa
         publicToken: sandboxData.publicToken,
         institutionId: "ins_109508",
         institutionName: "First Platypus Bank",
-        bankConnectionId,
+        bankConnectionId: targetBankConnectionId ?? bankConnectionId,
       }),
     });
 
@@ -161,7 +161,7 @@ export const ConnectBankPanel = forwardRef<ConnectBankPanelHandle, ConnectBankPa
     await syncConnection(exchangeData.bankConnectionId);
   }
 
-  async function runPlaidLink(linkData: LinkTokenResponse) {
+  async function runPlaidLink(linkData: LinkTokenResponse, targetBankConnectionId?: string) {
     await ensurePlaidScriptLoaded();
 
     setStatus(linkData.mode === "update" ? "Opening bank repair flow..." : "Opening Plaid Link...");
@@ -173,7 +173,7 @@ export const ConnectBankPanel = forwardRef<ConnectBankPanelHandle, ConnectBankPa
           void (async () => {
             try {
               if (linkData.mode === "update") {
-                await syncConnection(linkData.bankConnectionId ?? bankConnectionId);
+                await syncConnection(linkData.bankConnectionId ?? targetBankConnectionId ?? bankConnectionId);
                 resolve();
                 return;
               }
@@ -186,7 +186,7 @@ export const ConnectBankPanel = forwardRef<ConnectBankPanelHandle, ConnectBankPa
                   publicToken,
                   institutionId: metadata.institution?.institution_id,
                   institutionName: metadata.institution?.name,
-                  bankConnectionId,
+                  bankConnectionId: targetBankConnectionId ?? bankConnectionId,
                 }),
               });
 
@@ -225,16 +225,17 @@ export const ConnectBankPanel = forwardRef<ConnectBankPanelHandle, ConnectBankPa
     });
   }
 
-  async function connectBank() {
+  async function connectBank(targetBankConnectionId?: string) {
     setLoading(true);
     setError(null);
-    setStatus(bankConnectionId ? "Preparing reconnect flow..." : "Creating Plaid link token...");
+    const resolvedBankConnectionId = targetBankConnectionId ?? bankConnectionId;
+    setStatus(resolvedBankConnectionId ? "Preparing reconnect flow..." : "Creating Plaid link token...");
 
     try {
       const linkRes = await fetch("/api/plaid/create-link-token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bankConnectionId ? { bankConnectionId, mode: "update" } : {}),
+        body: JSON.stringify(resolvedBankConnectionId ? { bankConnectionId: resolvedBankConnectionId, mode: "update" } : {}),
       });
 
       if (!linkRes.ok) {
@@ -245,9 +246,9 @@ export const ConnectBankPanel = forwardRef<ConnectBankPanelHandle, ConnectBankPa
       const linkData = (await linkRes.json()) as LinkTokenResponse;
 
       if (linkData.isMock) {
-        await runSandboxFallback();
+        await runSandboxFallback(resolvedBankConnectionId);
       } else {
-        await runPlaidLink(linkData);
+        await runPlaidLink(linkData, resolvedBankConnectionId);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Bank connection failed.";

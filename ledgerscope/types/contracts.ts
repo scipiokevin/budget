@@ -88,13 +88,19 @@ export type BudgetRiskItem = {
 
 export type DashboardLinkedAccount = {
   id: string;
+  bankConnectionId: string;
   name: string;
+  institutionName?: string;
   mask?: string;
   type: string;
   subtype?: string;
   currentBalance?: number;
   availableBalance?: number;
   currencyCode: string;
+  connectionStatus: "active" | "inactive" | "error";
+  requiresReconnect: boolean;
+  itemErrorMessage?: string;
+  lastSyncedAt?: string;
 };
 export type ForecastVsBudgetPoint = {
   label: string;

@@ -168,7 +168,10 @@ export default function BudgetsPage() {
         <section className="grid gap-4 lg:grid-cols-3">
           <div className="grid gap-4 sm:grid-cols-2 lg:col-span-2">
             {safeCategories.length === 0 ? (
-              <EmptyState title="No budgets yet" detail="No budgets yet. Create your first category budget to start planning." />
+              <EmptyState
+                title="No budgets yet"
+                detail="Create your first category budget after connecting an account so LedgerScope can track spending against it."
+              />
             ) : (
               safeCategories.map((item) => (
                 <BudgetCategoryCard

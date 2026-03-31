@@ -217,7 +217,10 @@ export default function TransactionsPage() {
           />
 
           {isEmpty ? (
-            <EmptyState title="No transactions found" detail="Try adjusting filters, or click Sync Now to pull recent account activity." />
+            <EmptyState
+              title="No transactions found"
+              detail="Try adjusting filters, or use Sync Now after connecting a bank to pull recent account activity."
+            />
           ) : (
             <TransactionsTable
               items={safeItems}

@@ -36,6 +36,7 @@ export default function DashboardPage() {
   const [topActionLoading, setTopActionLoading] = useState(false);
   const [currentActionLabel, setCurrentActionLabel] = useState<string | null>(null);
   const [topActionError, setTopActionError] = useState<string | null>(null);
+  const [accountActionId, setAccountActionId] = useState<string | null>(null);
 
   if (loading) {
     return (
@@ -103,6 +104,39 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleRepairConnection(bankConnectionId: string, accountName: string) {
+    setAccountActionId(bankConnectionId);
+    setTopActionError(null);
+
+    try {
+      await connectPanelRef.current?.connect(bankConnectionId);
+      await reload();
+      pushToast({
+        title: "Connection restored",
+        message: `${accountName} is ready to sync again.`,
+        variant: "success",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to reconnect this bank right now.";
+      setTopActionError(message);
+      pushToast({ title: "Reconnect failed", message, variant: "error" });
+    } finally {
+      setAccountActionId(null);
+    }
+  }
+
+  function statusClasses(status: "active" | "inactive" | "error", requiresReconnect: boolean) {
+    if (requiresReconnect || status === "error") {
+      return "border-rose-200 bg-rose-50 text-rose-700";
+    }
+
+    if (status === "inactive") {
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    }
+
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
   const healthScore = financialHealth?.score ?? data.financialHealth.score;
   const isEmpty = data.monthlyTrends.length === 0 && data.recentAccountActivity.length === 0 && data.smartInsights.length === 0;
 
@@ -158,7 +192,7 @@ export default function DashboardPage() {
             </WidgetCard>
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-3">
+          <section className="grid gap-4 xl:grid-cols-4">
             <WidgetCard title="Smart insights" description="Plain-English guidance from synced data.">
               {data.smartInsights.length === 0 ? (
                 <p className="text-sm text-slate-500">No active insights.</p>
@@ -170,9 +204,59 @@ export default function DashboardPage() {
                 </div>
               )}
             </WidgetCard>
+            <WidgetCard title="Connected accounts" description={data.lastSyncedAt ? `Last portfolio sync ${new Date(data.lastSyncedAt).toLocaleString()}.` : "Connected banks and connection health."}>
+              {data.linkedAccounts.length === 0 ? (
+                <EmptyState
+                  title="No banks connected"
+                  detail="Connect a bank to import balances, transactions, and automatic sync updates."
+                />
+              ) : (
+                <ul className="space-y-3 text-sm">
+                  {data.linkedAccounts.map((account) => (
+                    <li key={account.id} className="rounded-xl border border-slate-200 px-3 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="font-semibold text-slate-900">{account.name}</p>
+                          <p className="text-xs text-slate-500">
+                            {account.institutionName ?? "Connected institution"}
+                            {account.mask ? ` • •••• ${account.mask}` : ""}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.08em] ${statusClasses(account.connectionStatus, account.requiresReconnect)}`}>
+                              {account.requiresReconnect ? "Reconnect required" : account.connectionStatus}
+                            </span>
+                            {account.lastSyncedAt ? (
+                              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                Synced {new Date(account.lastSyncedAt).toLocaleDateString()}
+                              </span>
+                            ) : null}
+                          </div>
+                          {account.itemErrorMessage ? <p className="text-xs text-rose-600">{account.itemErrorMessage}</p> : null}
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold text-slate-900">
+                            {typeof account.currentBalance === "number" ? formatCurrencyAmount(account.currentBalance) : "Balance pending"}
+                          </p>
+                          {account.requiresReconnect ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleRepairConnection(account.bankConnectionId, account.name)}
+                              disabled={accountActionId === account.bankConnectionId}
+                              className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {accountActionId === account.bankConnectionId ? "Repairing..." : "Reconnect"}
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </WidgetCard>
             <WidgetCard title="Recent account activity" description="Latest synced Plaid transactions.">
               {data.recentAccountActivity.length === 0 ? (
-                <p className="text-sm text-slate-500">No recent synced activity available.</p>
+                <EmptyState title="No recent activity" detail="Run a sync after connecting a bank to populate recent account activity." />
               ) : (
                 <ul className="space-y-2 text-sm">
                   {data.recentAccountActivity.map((item) => (
@@ -190,7 +274,11 @@ export default function DashboardPage() {
               )}
             </WidgetCard>
             <WidgetCard title="Net worth trend" description="Linked assets trend snapshot.">
-              <NetWorthTrendChart points={data.netWorth.trend} />
+              {data.netWorth.trend.length === 0 ? (
+                <EmptyState title="No asset trend yet" detail="Connect at least one bank account to start building a net worth trend." />
+              ) : (
+                <NetWorthTrendChart points={data.netWorth.trend} />
+              )}
             </WidgetCard>
           </section>
         </DataSurface>

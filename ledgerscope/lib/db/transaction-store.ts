@@ -471,6 +471,7 @@ export async function getLinkedAccountsFromPrisma(userId: string): Promise<Dashb
     orderBy: { updatedAt: "desc" },
     select: {
       id: true,
+      bankConnectionId: true,
       name: true,
       mask: true,
       type: true,
@@ -478,18 +479,38 @@ export async function getLinkedAccountsFromPrisma(userId: string): Promise<Dashb
       currentBalance: true,
       availableBalance: true,
       currencyCode: true,
+      bankConnection: {
+        select: {
+          institutionName: true,
+          status: true,
+          requiresReconnect: true,
+          itemErrorMessage: true,
+          lastSyncedAt: true,
+        },
+      },
     },
   });
 
   return accounts.map((account) => ({
     id: account.id,
+    bankConnectionId: account.bankConnectionId,
     name: account.name,
+    institutionName: account.bankConnection?.institutionName ?? undefined,
     mask: account.mask ?? undefined,
     type: account.type,
     subtype: account.subtype ?? undefined,
     currentBalance: account.currentBalance ? toNumber(account.currentBalance) : undefined,
     availableBalance: account.availableBalance ? toNumber(account.availableBalance) : undefined,
     currencyCode: account.currencyCode,
+    connectionStatus:
+      account.bankConnection?.status === "ERROR"
+        ? "error"
+        : account.bankConnection?.status === "INACTIVE"
+          ? "inactive"
+          : "active",
+    requiresReconnect: account.bankConnection?.requiresReconnect ?? false,
+    itemErrorMessage: account.bankConnection?.itemErrorMessage ?? undefined,
+    lastSyncedAt: account.bankConnection?.lastSyncedAt?.toISOString(),
   }));
 }
 
