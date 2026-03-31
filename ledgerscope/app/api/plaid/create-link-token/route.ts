@@ -16,17 +16,24 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await parseOptionalJsonBody(request, plaidCreateLinkTokenSchema, {});
-    const result = await generateLinkTokenForUser(userId, session.user.email, body.redirectUri);
+    const result = await generateLinkTokenForUser(userId, session.user.email, {
+      redirectUri: body.redirectUri,
+      bankConnectionId: body.bankConnectionId,
+      mode: body.mode,
+    });
 
     return NextResponse.json({
       linkToken: result.linkToken,
       expiration: result.expiration,
       isMock: result.isMock,
+      mode: result.mode,
+      bankConnectionId: result.bankConnectionId,
     });
   } catch (error) {
     if (error instanceof ZodError) return validationErrorResponse(error);
     if (error instanceof SyntaxError) return invalidJsonResponse();
 
+    console.error("[plaid] create-link-token failed", error);
     return NextResponse.json<AppApiError>(
       { error: "Failed to create Plaid link token.", code: "SERVER_ERROR" },
       { status: 500 },

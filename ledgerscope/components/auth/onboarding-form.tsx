@@ -41,13 +41,14 @@ export function OnboardingForm({ userName }: OnboardingFormProps) {
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Onboarding</p>
         <h1 className="mt-2 text-3xl font-semibold text-slate-900">Welcome{userName ? `, ${userName}` : ""}</h1>
         <p className="mt-3 text-sm text-slate-600">
-          Your workspace is ready. We will guide you through connecting accounts and tuning budget thresholds next.
+          Your workspace is ready. Start by securely linking a bank through Plaid so LedgerScope can import transactions,
+          build budgets, and keep your dashboard current.
         </p>
 
         <div className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 md:grid-cols-3">
           <div>
             <p className="font-medium text-slate-900">1. Connect accounts</p>
-            <p className="mt-1">Link bank and card sources for transaction sync.</p>
+            <p className="mt-1">Use secure Plaid Link to connect bank and card sources for ongoing sync.</p>
           </div>
           <div>
             <p className="font-medium text-slate-900">2. Configure budgets</p>

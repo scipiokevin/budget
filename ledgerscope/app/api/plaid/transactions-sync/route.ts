@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof ZodError) return validationErrorResponse(error);
     if (error instanceof SyntaxError) return invalidJsonResponse();
 
+    console.error("[plaid] transactions-sync failed", error);
     return NextResponse.json<AppApiError>(
       { error: "Failed to sync transactions.", code: "SERVER_ERROR" },
       { status: 500 },

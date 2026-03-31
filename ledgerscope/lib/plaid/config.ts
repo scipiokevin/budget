@@ -4,9 +4,9 @@ const PLAID_BASE_URL_BY_ENV = {
   production: "https://production.plaid.com",
 } as const;
 
-type PlaidEnvironment = keyof typeof PLAID_BASE_URL_BY_ENV;
+export type PlaidEnvironment = keyof typeof PLAID_BASE_URL_BY_ENV;
 
-function resolvePlaidEnvironment(): PlaidEnvironment {
+export function resolvePlaidEnvironment(): PlaidEnvironment {
   const value = (process.env.PLAID_ENV ?? "sandbox").toLowerCase();
   if (value === "development" || value === "production" || value === "sandbox") {
     return value;
@@ -54,4 +54,24 @@ export function plaidCountryCodes(): string[] {
 export function plaidRedirectUri(): string | undefined {
   const value = process.env.PLAID_REDIRECT_URI?.trim();
   return value ? value : undefined;
+}
+
+export function plaidWebhookUrl(): string | undefined {
+  const value = process.env.PLAID_WEBHOOK_URL?.trim();
+  return value ? value : undefined;
+}
+
+export function plaidEnvironmentLabel(): string {
+  return resolvePlaidEnvironment();
+}
+
+export function plaidConfigSummary() {
+  return {
+    configured: isPlaidConfigured(),
+    environment: resolvePlaidEnvironment(),
+    products: plaidProducts(),
+    countryCodes: plaidCountryCodes(),
+    redirectUriConfigured: Boolean(plaidRedirectUri()),
+    webhookUrlConfigured: Boolean(plaidWebhookUrl()),
+  };
 }

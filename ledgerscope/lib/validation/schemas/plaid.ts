@@ -4,6 +4,8 @@ import { entityIdSchema, trimmedString } from "@/lib/validation/schemas/common";
 export const plaidCreateLinkTokenSchema = z
   .object({
     redirectUri: z.string().url("Redirect URI must be a valid URL").optional(),
+    bankConnectionId: entityIdSchema.optional(),
+    mode: z.enum(["create", "update"]).optional(),
   })
   .strict();
 
@@ -12,6 +14,7 @@ export const plaidExchangePublicTokenSchema = z
     publicToken: trimmedString("Public token", 512),
     institutionId: z.string().trim().max(128).optional(),
     institutionName: z.string().trim().max(160).optional(),
+    bankConnectionId: entityIdSchema.optional(),
   })
   .strict();
 

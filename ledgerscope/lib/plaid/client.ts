@@ -1,9 +1,12 @@
-﻿import {
+import {
+  isPlaidConfigured,
   plaidBaseUrl,
   plaidCountryCodes,
   plaidCredentials,
-  isPlaidConfigured,
+  plaidEnvironmentLabel,
   plaidProducts,
+  plaidRedirectUri,
+  plaidWebhookUrl,
 } from "@/lib/plaid/config";
 
 type PlaidTransaction = {
@@ -52,10 +55,61 @@ type PlaidSandboxPublicTokenResponse = {
   public_token: string;
   request_id: string;
 };
+
 type PlaidSandboxTransactionsCreateResponse = {
   transactions: PlaidTransaction[];
   request_id: string;
 };
+
+type PlaidWebhookVerificationJwk = {
+  kty: string;
+  alg?: string;
+  crv?: string;
+  kid?: string;
+  use?: string;
+  x?: string;
+  y?: string;
+  [key: string]: string | boolean | string[] | undefined;
+};
+
+type PlaidWebhookVerificationKeyResponse = {
+  key: PlaidWebhookVerificationJwk;
+  request_id: string;
+};
+
+type PlaidLinkTokenMode = "create" | "update";
+
+type CreatePlaidLinkTokenInput = {
+  userId: string;
+  email?: string | null;
+  redirectUri?: string;
+  accessToken?: string;
+  mode?: PlaidLinkTokenMode;
+};
+
+type PlaidErrorPayload = {
+  error_code?: string;
+  error_message?: string;
+  display_message?: string | null;
+  error_type?: string;
+  request_id?: string;
+};
+
+class PlaidApiError extends Error {
+  status: number;
+  code?: string;
+  displayMessage?: string | null;
+  requestId?: string;
+
+  constructor(status: number, payload: PlaidErrorPayload, fallback: string) {
+    super(payload.error_message ?? fallback);
+    this.name = "PlaidApiError";
+    this.status = status;
+    this.code = payload.error_code;
+    this.displayMessage = payload.display_message;
+    this.requestId = payload.request_id;
+  }
+}
 
 async function plaidPost<T>(path: string, payload: Record<string, unknown>): Promise<T> {
   const credentials = plaidCredentials();
@@ -72,18 +126,33 @@ async function plaidPost<T>(path: string, payload: Record<string, unknown>): Pro
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Plaid request failed (${response.status}): ${errorText}`);
+    let payload: PlaidErrorPayload = {};
+
+    try {
+      payload = JSON.parse(errorText) as PlaidErrorPayload;
+    } catch {
+      payload = {};
+    }
+
+    throw new PlaidApiError(response.status, payload, `Plaid request failed (${response.status}): ${errorText}`);
   }
 
   return (await response.json()) as T;
 }
 
-export async function createPlaidLinkToken(userId: string, email?: string | null, redirectUri?: string) {
+export async function createPlaidLinkToken({
+  userId,
+  email,
+  redirectUri,
+  accessToken,
+  mode = "create",
+}: CreatePlaidLinkTokenInput) {
   if (!isPlaidConfigured()) {
     return {
       isMock: true,
       linkToken: `link-sandbox-mock-${userId}-${Date.now()}`,
       expiration: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      mode,
     };
   }
 
@@ -98,8 +167,18 @@ export async function createPlaidLinkToken(userId: string, email?: string | null
     language: "en",
   };
 
-  if (redirectUri) {
-    payload.redirect_uri = redirectUri;
+  const webhook = plaidWebhookUrl();
+  if (webhook) {
+    payload.webhook = webhook;
+  }
+
+  const resolvedRedirectUri = redirectUri ?? plaidRedirectUri();
+  if (resolvedRedirectUri) {
+    payload.redirect_uri = resolvedRedirectUri;
+  }
+
+  if (mode === "update" && accessToken) {
+    payload.access_token = accessToken;
   }
 
   const response = await plaidPost<PlaidCreateLinkTokenResponse>("/link/token/create", payload);
@@ -108,6 +187,7 @@ export async function createPlaidLinkToken(userId: string, email?: string | null
     isMock: false,
     linkToken: response.link_token,
     expiration: response.expiration,
+    mode,
   };
 }
 
@@ -148,6 +228,16 @@ export async function exchangePlaidPublicToken(publicToken: string) {
     itemId: response.item_id,
     accessToken: response.access_token,
   };
+}
+
+export async function getPlaidWebhookVerificationKey(keyId: string) {
+  if (!isPlaidConfigured()) {
+    throw new Error("Plaid credentials are not configured.");
+  }
+
+  return plaidPost<PlaidWebhookVerificationKeyResponse>("/webhook_verification_key/get", {
+    key_id: keyId,
+  });
 }
 
 function mockTransactionsSync(cursor?: string | null): PlaidTransactionsSyncResponse {
@@ -214,9 +304,8 @@ export async function plaidTransactionsSync(accessToken: string, cursor?: string
     requestId = response.request_id;
   }
 
-
   if (
-    (process.env.PLAID_ENV ?? "").toLowerCase() === "sandbox" &&
+    plaidEnvironmentLabel() === "sandbox" &&
     !cursor &&
     added.length === 0 &&
     modified.length === 0 &&
@@ -228,6 +317,7 @@ export async function plaidTransactionsSync(accessToken: string, cursor?: string
       request_id: requestId || seeded.request_id,
     };
   }
+
   return {
     added,
     modified,
@@ -237,8 +327,6 @@ export async function plaidTransactionsSync(accessToken: string, cursor?: string
     request_id: requestId,
   };
 }
-
-export type { PlaidRemovedTransaction, PlaidTransaction };
 
 export async function seedPlaidSandboxTransactions(accessToken: string) {
   if (!isPlaidConfigured()) {
@@ -261,3 +349,14 @@ export async function seedPlaidSandboxTransactions(accessToken: string) {
   });
 }
 
+export function plaidSupportsOAuthRedirect() {
+  return Boolean(plaidRedirectUri());
+}
+
+export function plaidEnvironmentIsProductionLike() {
+  const environment = plaidEnvironmentLabel();
+  return environment === "production" || environment === "development";
+}
+
+export { PlaidApiError };
+export type { CreatePlaidLinkTokenInput, PlaidLinkTokenMode, PlaidRemovedTransaction, PlaidTransaction };

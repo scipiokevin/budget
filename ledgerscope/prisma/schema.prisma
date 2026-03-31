@@ -241,7 +241,11 @@ model BankConnection {
   institutionName      String?
   accessTokenEncrypted String
   status               ConnectionStatus @default(ACTIVE)
+  requiresReconnect    Boolean          @default(false)
+  itemErrorCode        String?
+  itemErrorMessage     String?
   lastSyncedAt         DateTime?
+  lastWebhookAt        DateTime?
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
   user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
