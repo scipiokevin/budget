@@ -14,6 +14,13 @@ const signupSchema = z.object({
 const DB_TIMEOUT_MS = 8000;
 
 type PrismaErrorWithCode = Error & { code?: string };
+type SignupLogContext = {
+  requestId: string;
+  email?: string;
+  stage: string;
+  code?: string;
+  details?: Record<string, unknown>;
+};
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -21,6 +28,23 @@ function normalizeEmail(email: string): string {
 
 function hasPrismaErrorCode(error: unknown): error is PrismaErrorWithCode {
   return error instanceof Error && "code" in error;
+}
+
+function logSignupInfo(context: SignupLogContext) {
+  console.info("[signup]", context);
+}
+
+function logSignupError(context: SignupLogContext, error: unknown) {
+  const normalizedError =
+    error instanceof Error
+      ? {
+          name: error.name,
+          message: error.message,
+          ...(hasPrismaErrorCode(error) ? { code: error.code } : {}),
+        }
+      : { value: String(error) };
+
+  console.error("[signup]", { ...context, error: normalizedError });
 }
 
 function timeoutResponse(message: string) {
@@ -35,6 +59,8 @@ function timeoutResponse(message: string) {
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = crypto.randomUUID();
+
   try {
     const body = await request.json();
     const parsed = signupSchema.safeParse(body);
@@ -53,12 +79,24 @@ export async function POST(request: NextRequest) {
 
     const { name, password } = parsed.data;
     const email = normalizeEmail(parsed.data.email);
+    logSignupInfo({
+      requestId,
+      email,
+      stage: "validated",
+      details: { hasName: Boolean(name), passwordLength: password.length },
+    });
 
     const existing = await withTimeout(
       prisma.user.findUnique({ where: { email }, select: { id: true } }),
       DB_TIMEOUT_MS,
       "Signup lookup timed out.",
     );
+    logSignupInfo({
+      requestId,
+      email,
+      stage: "lookup_complete",
+      details: { existingUser: Boolean(existing) },
+    });
 
     if (existing) {
       return NextResponse.json<AppApiError>(
@@ -68,6 +106,11 @@ export async function POST(request: NextRequest) {
     }
 
     const passwordHash = await withTimeout(hash(password, 12), DB_TIMEOUT_MS, "Password hashing timed out.");
+    logSignupInfo({
+      requestId,
+      email,
+      stage: "password_hashed",
+    });
 
     const createdUser = await withTimeout(
       prisma.user.create({
@@ -82,8 +125,22 @@ export async function POST(request: NextRequest) {
       DB_TIMEOUT_MS,
       "Creating user timed out.",
     );
+    logSignupInfo({
+      requestId,
+      email,
+      stage: "user_created",
+      details: { userId: createdUser.id },
+    });
 
     if (!createdUser?.id) {
+      logSignupError(
+        {
+          requestId,
+          email,
+          stage: "create_result_invalid",
+        },
+        new Error("User create returned no id"),
+      );
       return NextResponse.json<AppApiError>(
         {
           error: "Account could not be created.",
@@ -104,17 +161,39 @@ export async function POST(request: NextRequest) {
     }
 
     if (error instanceof TimeoutError) {
+      logSignupError(
+        {
+          requestId,
+          stage: "timeout",
+        },
+        error,
+      );
       return timeoutResponse(error.message);
     }
 
     if (hasPrismaErrorCode(error) && error.code === "P2002") {
+      logSignupError(
+        {
+          requestId,
+          stage: "prisma_duplicate",
+          code: error.code,
+        },
+        error,
+      );
       return NextResponse.json<AppApiError>(
         { error: "Email is already registered.", code: "CONFLICT" },
         { status: 409 },
       );
     }
 
-    console.error("Signup failed", error);
+    logSignupError(
+      {
+        requestId,
+        stage: "unexpected_failure",
+        code: hasPrismaErrorCode(error) ? error.code : undefined,
+      },
+      error,
+    );
 
     return NextResponse.json<AppApiError>(
       {
