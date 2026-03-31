@@ -1,5 +1,13 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Deployment Notes
+
+- Vercel Root Directory should be set to `ledgerscope`
+- `NEXTAUTH_URL` must be named exactly `NEXTAUTH_URL`
+- Do not use `NEXTAUTH-URL`
+- After deployment, set `NEXTAUTH_URL` to the real deployed domain, for example:
+  - `https://your-ledgerscope-domain.vercel.app`
+
 ## Getting Started
 
 First, run the development server:
