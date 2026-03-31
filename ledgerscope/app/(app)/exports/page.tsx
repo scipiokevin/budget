@@ -176,7 +176,7 @@ export default function ExportsPage() {
     >
       <DataSurface>
         {creating || refreshing ? <LoadingState label={creating ? "Generating export..." : "Refreshing export runs..."} /> : null}
-        {createError ? <ErrorState message={createError} /> : null}
+        {createError ? <ErrorState message={createError} onDismiss={() => setCreateError(null)} /> : null}
         {createSuccess ? <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{createSuccess}</p> : null}
 
         <section className="grid gap-4 xl:grid-cols-2">

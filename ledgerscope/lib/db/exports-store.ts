@@ -1,5 +1,3 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { prisma } from "@/lib/db/prisma";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import * as XLSX from "xlsx";
@@ -65,7 +63,10 @@ type ExportTransactionDbRow = {
 type ExportDownloadRow = {
   id: string;
   format: PrismaExportFormat;
-  filePath: string | null;
+  mode: PrismaExportMode;
+  scope: PrismaExportScope;
+  periodStart: Date | null;
+  periodEnd: Date | null;
   status: PrismaExportStatus;
 };
 
@@ -399,6 +400,43 @@ function extensionForFormat(format: ExportCreatePayload["format"]): string {
   return "csv";
 }
 
+function payloadFromRun(run: ExportDownloadRow): ExportCreatePayload {
+  return {
+    format: run.format.toLowerCase() as ExportCreatePayload["format"],
+    mode: run.mode.toLowerCase() as ExportCreatePayload["mode"],
+    scope: run.scope.toLowerCase() as ExportCreatePayload["scope"],
+    dateFrom: run.periodStart?.toISOString().slice(0, 10),
+    dateTo: run.periodEnd?.toISOString().slice(0, 10),
+  };
+}
+
+async function buildExportFile(runId: string, preview: ExportPreview, payload: ExportCreatePayload): Promise<ExportFile> {
+  const extension = extensionForFormat(payload.format);
+  const filename = `ledger-export-${runId}.${extension}`;
+
+  if (payload.format === "csv") {
+    return {
+      buffer: Buffer.from(buildCsv(preview), "utf8"),
+      filename,
+      contentType: "text/csv; charset=utf-8",
+    };
+  }
+
+  if (payload.format === "xlsx") {
+    return {
+      buffer: buildXlsx(preview),
+      filename,
+      contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    };
+  }
+
+  return {
+    buffer: Buffer.from(await buildPdf(preview)),
+    filename,
+    contentType: "application/pdf",
+  };
+}
+
 export async function getExportsDataFromPrisma(userId: string): Promise<ExportsData> {
   const runs = await prisma.exportRun.findMany({
     where: { userId },
@@ -442,24 +480,13 @@ export async function createExportInPrisma(userId: string, payload: ExportCreate
 
   try {
     const preview = await buildPreview(userId, payload);
-    const ext = extensionForFormat(payload.format);
-    const exportDir = path.join(process.cwd(), "tmp", "exports");
-    await fs.mkdir(exportDir, { recursive: true });
-    const filePath = path.join(exportDir, `${run.id}.${ext}`);
-
-    if (payload.format === "csv") {
-      await fs.writeFile(filePath, buildCsv(preview), "utf8");
-    } else if (payload.format === "xlsx") {
-      await fs.writeFile(filePath, buildXlsx(preview));
-    } else {
-      await fs.writeFile(filePath, await buildPdf(preview));
-    }
+    await buildExportFile(run.id, preview, payload);
 
     const updated = await prisma.exportRun.update({
       where: { id: run.id },
       data: {
         status: EXPORT_STATUS.COMPLETED,
-        filePath,
+        filePath: null,
         rowCount: preview.rowCount,
         totalAmount: preview.itemizedTotal,
         completedAt: new Date(),
@@ -472,7 +499,7 @@ export async function createExportInPrisma(userId: string, payload: ExportCreate
       format: payload.format,
       rows: preview.rowCount,
       totalAmount: preview.itemizedTotal,
-      filePath,
+      storage: "memory",
     });
 
     return {
@@ -502,10 +529,18 @@ export async function createExportInPrisma(userId: string, payload: ExportCreate
 export async function getExportDownload(userId: string, id: string): Promise<ExportFile | null> {
   const run: ExportDownloadRow | null = await prisma.exportRun.findFirst({
     where: { id, userId },
-    select: { id: true, format: true, filePath: true, status: true },
+    select: {
+      id: true,
+      format: true,
+      mode: true,
+      scope: true,
+      periodStart: true,
+      periodEnd: true,
+      status: true,
+    },
   });
 
-  if (!run || run.status !== EXPORT_STATUS.COMPLETED || !run.filePath) return null;
+  if (!run || run.status !== EXPORT_STATUS.COMPLETED) return null;
 
   logExport("download.start", {
     userId,
@@ -513,14 +548,7 @@ export async function getExportDownload(userId: string, id: string): Promise<Exp
     format: run.format,
   });
 
-  const content = await fs.readFile(run.filePath);
-  const filename = `ledger-export-${run.id}.${run.format.toLowerCase()}`;
-  const contentType =
-    run.format === EXPORT_FORMAT.CSV
-      ? "text/csv; charset=utf-8"
-      : run.format === EXPORT_FORMAT.XLSX
-        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        : "application/pdf";
-
-  return { buffer: content, filename, contentType };
+  const payload = payloadFromRun(run);
+  const preview = await buildPreview(userId, payload);
+  return buildExportFile(run.id, preview, payload);
 }

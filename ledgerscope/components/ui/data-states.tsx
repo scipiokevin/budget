@@ -15,10 +15,29 @@ export function LoadingState({ label = "Loading..." }: { label?: string }) {
   );
 }
 
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ErrorState({
+  message,
+  onRetry,
+  onDismiss,
+}: {
+  message: string;
+  onRetry?: () => void;
+  onDismiss?: () => void;
+}) {
   return (
     <section className="rounded-xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700 shadow-sm">
-      <p>{message}</p>
+      <div className="flex items-start justify-between gap-3">
+        <p className="flex-1">{message}</p>
+        {onDismiss ? (
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="rounded-md border border-rose-300 bg-white px-2 py-0.5 text-xs font-medium text-rose-700 transition-colors duration-150 hover:bg-rose-100"
+          >
+            Dismiss
+          </button>
+        ) : null}
+      </div>
       {onRetry ? (
         <button
           type="button"

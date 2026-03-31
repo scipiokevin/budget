@@ -69,7 +69,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               </div>
               <button
                 type="button"
-                onClick={() => dismissToast(toast.id)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  dismissToast(toast.id);
+                }}
                 className="rounded-md px-1.5 py-0.5 text-xs opacity-70 transition hover:opacity-100"
               >
                 Dismiss
