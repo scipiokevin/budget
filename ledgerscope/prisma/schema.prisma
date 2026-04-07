@@ -17,6 +17,12 @@ enum TransactionDirection {
   CREDIT
 }
 
+enum TransactionSource {
+  PLAID
+  STATEMENT_PDF
+  MANUAL
+}
+
 enum TransactionPurpose {
   PERSONAL
   BUSINESS
@@ -189,6 +195,8 @@ model User {
   watchRules                 WatchRule[]
   watchMatches               WatchMatch[]
   exportRuns                 ExportRun[]
+  statementImports           StatementImport[]
+  statementImportEntries     StatementImportEntry[]
   auditLogs                  AuditLog[]
 }
 
@@ -352,6 +360,7 @@ model Transaction {
   amount              Decimal                         @db.Decimal(14, 2)
   currency            String                          @default("USD")
   direction           TransactionDirection
+  source              TransactionSource               @default(PLAID)
   merchantRaw         String?
   merchantNormalized  String?
   description         String?
@@ -375,6 +384,7 @@ model Transaction {
   purposeAssignments  TransactionPurposeAssignment[]
   watchRulesCreated   WatchRule[]
   watchMatches        WatchMatch[]
+  statementImportEntries StatementImportEntry[]
 
   @@index([userId, date])
   @@index([bankAccountId, date])
@@ -382,6 +392,55 @@ model Transaction {
   @@index([purpose])
   @@index([cashFlowType])
   @@index([reviewStatus])
+  @@index([source])
+}
+
+model StatementImport {
+  id                     String                 @id @default(cuid())
+  userId                 String
+  filename               String
+  fileSize               Int
+  mimeType               String
+  accountLabel           String?
+  statementPeriodStart   DateTime?
+  statementPeriodEnd     DateTime?
+  parserStatus           String                 @default("parsed")
+  parserMessage          String?
+  parserConfidence       Decimal?               @db.Decimal(5, 2)
+  detectedTransactionCount Int                  @default(0)
+  importedTransactionCount Int                  @default(0)
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  importedAt             DateTime?
+  user                   User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries                StatementImportEntry[]
+
+  @@index([userId, createdAt])
+}
+
+model StatementImportEntry {
+  id                  String            @id @default(cuid())
+  statementImportId   String
+  userId              String
+  transactionId       String?
+  date                DateTime?
+  description         String
+  merchant            String?
+  amount              Decimal           @db.Decimal(14, 2)
+  direction           TransactionDirection?
+  confidence          Decimal?          @db.Decimal(5, 2)
+  duplicateTransactionId String?
+  selectedForImport   Boolean           @default(true)
+  rawLine             String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  statementImport     StatementImport   @relation(fields: [statementImportId], references: [id], onDelete: Cascade)
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction         Transaction?      @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([statementImportId])
+  @@index([userId, createdAt])
+  @@index([duplicateTransactionId])
 }
 
 model TransactionSplit {

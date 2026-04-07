@@ -8,6 +8,7 @@ import type {
   SpendingTrend,
   TransactionPurpose,
   TransactionRecord,
+  TransactionSource as UiTransactionSource,
   TransactionsData,
   TransactionsFilterOptions,
   TransactionsMutationRequest,
@@ -38,6 +39,7 @@ type PrismaCashFlowType =
 type PrismaReviewStatus = "UNREVIEWED" | "REVIEWED" | "NEEDS_REVIEW";
 type PrismaTransactionPurpose = "PERSONAL" | "BUSINESS" | "SPLIT" | "UNCERTAIN";
 type PrismaTransactionStatus = "PENDING" | "POSTED" | "REMOVED";
+type PrismaTransactionSource = "PLAID" | "STATEMENT_PDF" | "MANUAL";
 
 type StringFilter = {
   equals?: string;
@@ -71,6 +73,7 @@ type TransactionDbRow = {
   amount: DecimalLike;
   purpose: PrismaTransactionPurpose;
   status: PrismaTransactionStatus;
+  source: PrismaTransactionSource;
   reviewStatus: PrismaReviewStatus;
   isSuspicious: boolean;
   bankAccount: { name: string } | null;
@@ -130,6 +133,12 @@ const TRANSACTION_STATUS = {
   POSTED: "POSTED",
   REMOVED: "REMOVED",
 } as const satisfies Record<"PENDING" | "POSTED" | "REMOVED", PrismaTransactionStatus>;
+
+const TRANSACTION_SOURCE = {
+  PLAID: "PLAID",
+  STATEMENT_PDF: "STATEMENT_PDF",
+  MANUAL: "MANUAL",
+} as const satisfies Record<"PLAID" | "STATEMENT_PDF" | "MANUAL", PrismaTransactionSource>;
 
 function toNumber(value: DecimalLike | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
@@ -201,6 +210,17 @@ function mapReviewToPrisma(value: UiReviewStatus): PrismaReviewStatus {
   return value === "reviewed" ? REVIEW_STATUS.REVIEWED : REVIEW_STATUS.UNREVIEWED;
 }
 
+function mapSourceFromPrisma(value: PrismaTransactionSource): UiTransactionSource {
+  switch (value) {
+    case TRANSACTION_SOURCE.STATEMENT_PDF:
+      return "statement_pdf";
+    case TRANSACTION_SOURCE.MANUAL:
+      return "manual";
+    default:
+      return "plaid";
+  }
+}
+
 function mapTransactionRecord(tx: TransactionDbRow): TransactionRecord {
   const split = tx.splits[0];
   const tags = extractTags(tx.notes);
@@ -214,6 +234,7 @@ function mapTransactionRecord(tx: TransactionDbRow): TransactionRecord {
     category: tx.categoryPrimary ?? "Uncategorized",
     account: tx.bankAccount?.name ?? "Connected account",
     amount: toNumber(tx.amount),
+    source: mapSourceFromPrisma(tx.source),
     purpose: mapPurposeFromPrisma(tx.purpose),
     status: mapStatusFromPrisma(tx.status),
     reviewStatus: mapReviewFromPrisma(tx.reviewStatus),
@@ -647,6 +668,7 @@ export async function getDashboardCashflowSnapshot(userId: string): Promise<{
       cashFlowType: true,
       categoryPrimary: true,
       purpose: true,
+      source: true,
     },
   });
 

@@ -22,6 +22,18 @@ function suspiciousBadgeClass(isSuspicious: boolean) {
   return isSuspicious ? "bg-rose-50 text-rose-700 border-rose-200" : "bg-slate-100 text-slate-700 border-slate-200";
 }
 
+function sourceBadgeClass(source: TransactionRecord["source"]) {
+  if (source === "statement_pdf") return "bg-amber-50 text-amber-700 border-amber-200";
+  if (source === "manual") return "bg-sky-50 text-sky-700 border-sky-200";
+  return "bg-emerald-50 text-emerald-700 border-emerald-200";
+}
+
+function sourceLabel(source: TransactionRecord["source"]) {
+  if (source === "statement_pdf") return "Statement PDF";
+  if (source === "manual") return "Manual";
+  return "Plaid";
+}
+
 function categoryToken(category: string) {
   const normalized = category.trim();
   if (!normalized) return "?";
@@ -33,6 +45,7 @@ type TransactionsTableProps = {
   page: number;
   totalPages: number;
   totalCount: number;
+  loading?: boolean;
   onPageChange: (page: number) => void;
   onSelect: (item: TransactionRecord) => void;
 };
@@ -42,6 +55,7 @@ export function TransactionsTable({
   page,
   totalPages,
   totalCount,
+  loading = false,
   onPageChange,
   onSelect,
 }: TransactionsTableProps) {
@@ -56,6 +70,7 @@ export function TransactionsTable({
               <th className="px-4 py-3 font-medium">Category</th>
               <th className="px-4 py-3 font-medium">Tags</th>
               <th className="px-4 py-3 font-medium">Account</th>
+              <th className="px-4 py-3 font-medium">Source</th>
               <th className="px-4 py-3 text-right font-medium">Amount</th>
               <th className="px-4 py-3 font-medium">Purpose</th>
               <th className="px-4 py-3 font-medium">Status</th>
@@ -99,6 +114,11 @@ export function TransactionsTable({
                   )}
                 </td>
                 <td className="px-4 py-4 text-xs text-slate-600">{item.account}</td>
+                <td className="px-4 py-4">
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${sourceBadgeClass(item.source)}`}>
+                    {sourceLabel(item.source)}
+                  </span>
+                </td>
                 <td className="px-4 py-4 text-right text-[15px] font-semibold tracking-tight text-slate-900">{formatCurrencyAmount(item.amount)}</td>
                 <td className="px-4 py-4">
                   <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${purposeBadgeClass(item.purpose)}`}>
@@ -125,6 +145,7 @@ export function TransactionsTable({
                     type="button"
                     onClick={() => onSelect(item)}
                     className="rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-700 transition-colors duration-150 hover:border-slate-400 hover:bg-slate-50"
+                    disabled={loading}
                   >
                     Details
                   </button>
@@ -142,7 +163,7 @@ export function TransactionsTable({
         <div className="flex gap-2">
           <button
             type="button"
-            disabled={page <= 1}
+            disabled={loading || page <= 1}
             onClick={() => onPageChange(page - 1)}
             className="rounded-lg border border-slate-300 px-2 py-1 transition-colors duration-150 disabled:opacity-50"
           >
@@ -150,7 +171,7 @@ export function TransactionsTable({
           </button>
           <button
             type="button"
-            disabled={page >= totalPages}
+            disabled={loading || page >= totalPages}
             onClick={() => onPageChange(page + 1)}
             className="rounded-lg border border-slate-300 px-2 py-1 transition-colors duration-150 disabled:opacity-50"
           >

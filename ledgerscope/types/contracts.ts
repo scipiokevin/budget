@@ -213,6 +213,7 @@ export type TransactionPurpose = "personal" | "business" | "split" | "uncertain"
 export type TransactionStatus = "pending" | "posted";
 export type ReviewStatus = "unreviewed" | "reviewed";
 export type SplitMethod = "percentage" | "amount";
+export type TransactionSource = "plaid" | "statement_pdf" | "manual";
 
 export type ExpenseTag =
   | "vacation"
@@ -239,6 +240,7 @@ export type TransactionRecord = {
   category: string;
   account: string;
   amount: number;
+  source: TransactionSource;
   purpose: TransactionPurpose;
   status: TransactionStatus;
   reviewStatus: ReviewStatus;
@@ -594,6 +596,60 @@ export type ExportCreateResponse = {
 export type IncomeData = ModuleData;
 export type SettingsData = ModuleData;
 export type BusinessData = ModuleData;
+
+export type StatementImportEntryPreview = {
+  id: string;
+  date?: string;
+  description: string;
+  merchant?: string;
+  amount: number;
+  direction?: "debit" | "credit";
+  confidence: number;
+  duplicateTransactionId?: string;
+  duplicateReason?: string;
+  selectedForImport: boolean;
+};
+
+export type StatementImportPreview = {
+  id: string;
+  filename: string;
+  fileSize: number;
+  mimeType: string;
+  accountLabel?: string;
+  statementPeriodStart?: string;
+  statementPeriodEnd?: string;
+  parserStatus: "parsed" | "needs_review" | "failed" | "imported" | "cancelled";
+  parserMessage?: string;
+  parserConfidence: number;
+  detectedTransactionCount: number;
+  importedTransactionCount: number;
+  createdAt: string;
+  importedAt?: string;
+  transactions: StatementImportEntryPreview[];
+};
+
+export type StatementImportHistoryItem = {
+  id: string;
+  filename: string;
+  uploadedAt: string;
+  statementPeriodLabel: string;
+  importedTransactionCount: number;
+  parserStatus: "parsed" | "needs_review" | "failed" | "imported" | "cancelled";
+  accountLabel?: string;
+};
+
+export type StatementImportUploadResponse = {
+  importPreview: StatementImportPreview;
+};
+
+export type StatementImportFinalizeResponse = {
+  importPreview: StatementImportPreview;
+  importedCount: number;
+};
+
+export type StatementImportHistoryResponse = {
+  items: StatementImportHistoryItem[];
+};
 
 export type AppApiError = {
   error: string;

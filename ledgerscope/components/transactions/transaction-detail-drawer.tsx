@@ -32,6 +32,12 @@ const EXPENSE_TAG_OPTIONS: ExpenseTag[] = [
   "business trip",
 ];
 
+function sourceLabel(source: TransactionRecord["source"]) {
+  if (source === "statement_pdf") return "Statement PDF";
+  if (source === "manual") return "Manual";
+  return "Plaid";
+}
+
 export function TransactionDetailDrawer({
   transaction,
   open,
@@ -84,6 +90,8 @@ export function TransactionDetailDrawer({
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-md bg-slate-50 p-3">Amount: {formatCurrencyAmount(transaction.amount)}</div>
           <div className="rounded-md bg-slate-50 p-3">Date: {transaction.date}</div>
+          <div className="rounded-md bg-slate-50 p-3">Source: {sourceLabel(transaction.source)}</div>
+          <div className="rounded-md bg-slate-50 p-3">Account: {transaction.account}</div>
         </div>
 
         <label className="block">

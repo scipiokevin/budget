@@ -11,6 +11,9 @@ import type {
   ForecastOverviewData,
   IncomeData,
   InsightsData,
+  StatementImportFinalizeResponse,
+  StatementImportHistoryResponse,
+  StatementImportUploadResponse,
   SettingsData,
   TransactionRecord,
   TransactionsData,
@@ -122,6 +125,10 @@ export const appApi = {
     }),
   getForecastOverview: () => requestJson<ForecastOverviewData>("/api/insights/forecast"),
   getInsights: () => requestJson<InsightsData>("/api/insights"),
+  recomputeInsights: () =>
+    requestJson<{ ok: boolean }>("/api/insights", {
+      method: "POST",
+    }),
   setTripAssignment: (transactionId: string, tripId: string | null) =>
     requestJson<{ ok: boolean }>("/api/insights", {
       method: "PATCH",
@@ -143,6 +150,42 @@ export const appApi = {
     requestJson<ExportCreateResponse>("/api/exports", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  getStatementImportHistory: () => requestJson<StatementImportHistoryResponse>("/api/statement-imports"),
+  uploadStatementPdf: async (file: File): Promise<StatementImportUploadResponse> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch("/api/statement-imports", {
+      method: "POST",
+      body: formData,
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      let detail: string | undefined;
+
+      try {
+        const body = (await response.json()) as { error?: string };
+        detail = body.error;
+      } catch {
+        detail = undefined;
+      }
+
+      throw new Error(detail ?? "Failed to upload statement PDF.");
+    }
+
+    return (await response.json()) as StatementImportUploadResponse;
+  },
+  finalizeStatementImport: (id: string, selectedEntryIds: string[]) =>
+    requestJson<StatementImportFinalizeResponse>(`/api/statement-imports/${id}`, {
+      method: "POST",
+      body: JSON.stringify({ action: "confirm", selectedEntryIds }),
+    }),
+  cancelStatementImport: (id: string) =>
+    requestJson<{ ok: boolean }>(`/api/statement-imports/${id}`, {
+      method: "POST",
+      body: JSON.stringify({ action: "cancel" }),
     }),
   getSettings: () => requestJson<SettingsData>("/api/settings"),
   getBusiness: () => requestJson<BusinessData>("/api/business"),
