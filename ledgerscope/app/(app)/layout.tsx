@@ -26,7 +26,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <AppSidebar />
       <section>
         <div className="flex justify-end p-4 md:p-6">
-          <UserMenu email={session.user.email} />
+          <UserMenu name={session.user.name} email={session.user.email} />
         </div>
         {children}
       </section>
