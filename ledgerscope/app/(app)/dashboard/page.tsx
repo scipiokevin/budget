@@ -141,7 +141,6 @@ export default function DashboardPage() {
     try {
       await appApi.dismissSmartInsight(insightId);
       pushToast({ title: "Insight dismissed", message: "This insight has been removed from your dashboard.", variant: "success" });
-      await reload();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to dismiss insight.";
       setDismissError(message);
@@ -176,8 +175,8 @@ export default function DashboardPage() {
       onActionClick={(action) => void handleHeaderAction(action)}
     >
       {topActionLoading ? <LoadingState label="Running action..." /> : null}
-      {topActionError ? <ErrorState message={topActionError} /> : null}
-      {dismissError ? <ErrorState message={dismissError} /> : null}
+      {topActionError ? <ErrorState message={topActionError} onDismiss={() => setTopActionError(null)} /> : null}
+      {dismissError ? <ErrorState message={dismissError} onDismiss={() => setDismissError(null)} /> : null}
       <ConnectBankPanel ref={connectPanelRef} compact />
 
       {isEmpty ? (
