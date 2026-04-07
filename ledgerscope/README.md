@@ -7,6 +7,21 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 - Do not use `NEXTAUTH-URL`
 - After deployment, set `NEXTAUTH_URL` to the real deployed domain, for example:
   - `https://your-ledgerscope-domain.vercel.app`
+- Prisma/Neon connection setup should be split:
+  - `DATABASE_URL` = pooled Neon connection for the app/runtime
+  - `DIRECT_DATABASE_URL` = direct Neon connection for Prisma migrations
+- If you are using Neon:
+  - `DATABASE_URL` should usually use the `-pooler` hostname
+  - `DIRECT_DATABASE_URL` should use the non-`-pooler` direct hostname
+- Prisma 7 in this repo reads migration/build datasource config from:
+  - [C:\Users\KevDev\Documents\Playground 8\ledgerscope\prisma.config.ts](C:\Users\KevDev\Documents\Playground%208\ledgerscope\prisma.config.ts)
+- The app runtime still reads:
+  - `DATABASE_URL` in [C:\Users\KevDev\Documents\Playground 8\ledgerscope\lib\db\prisma.ts](C:\Users\KevDev\Documents\Playground%208\ledgerscope\lib\db\prisma.ts)
+- Vercel migrations run through `npm run build:vercel`, which now calls:
+  - `npm run migrate:deploy`
+  - then `prisma generate`
+  - then `next build`
+- `DIRECT_DATABASE_URL` is required in Vercel so `prisma migrate deploy` can acquire the advisory lock Prisma Migrate needs.
 
 ## Getting Started
 
