@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import type { SmartInsightCard } from "@/types/contracts";
 
 type SmartInsightItemCardProps = {
@@ -38,17 +41,23 @@ function severityStyles(severity: SmartInsightCard["severity"]) {
   };
 }
 
+function shouldCollapse(message: string) {
+  return message.trim().length > 120;
+}
+
 export function SmartInsightItemCard({ insight, onDismiss }: SmartInsightItemCardProps) {
   const styles = severityStyles(insight.severity);
+  const [expanded, setExpanded] = useState(false);
+  const canExpand = useMemo(() => shouldCollapse(insight.message), [insight.message]);
 
   return (
     <article className={`rounded-2xl border px-4 py-3 ${styles.wrap}`}>
-      <div className="mb-1 flex items-start justify-between gap-3">
-        <div className="flex items-start gap-2">
-          <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold ${styles.iconClass}`}>
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${styles.iconClass}`}>
             {styles.icon}
           </span>
-          <div>
+          <div className="min-w-0">
             <p className={`text-sm font-semibold ${styles.text}`}>{insight.title}</p>
             <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${styles.pill}`}>
               {styles.label}
@@ -60,13 +69,29 @@ export function SmartInsightItemCard({ insight, onDismiss }: SmartInsightItemCar
           <button
             type="button"
             onClick={() => onDismiss(insight.id)}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 transition-colors duration-150 hover:bg-slate-50"
+            className="shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 transition-colors duration-150 hover:bg-slate-50"
+            aria-label={`Dismiss insight: ${insight.title}`}
           >
             Dismiss
           </button>
         ) : null}
       </div>
-      <p className={`line-clamp-1 text-sm ${styles.text}`}>{insight.message}</p>
+
+      <p className={`text-sm leading-6 ${styles.text} ${!expanded && canExpand ? "line-clamp-3" : ""}`}>{insight.message}</p>
+
+      {canExpand ? (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setExpanded((current) => !current)}
+            className="rounded-lg border border-transparent px-1 py-0.5 text-xs font-medium text-slate-700 transition-colors duration-150 hover:border-slate-300 hover:bg-white/70"
+            aria-expanded={expanded}
+            aria-label={expanded ? `Show less for insight: ${insight.title}` : `Show more for insight: ${insight.title}`}
+          >
+            {expanded ? "Show less" : "Show more"}
+          </button>
+        </div>
+      ) : null}
     </article>
   );
 }
