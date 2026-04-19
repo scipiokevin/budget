@@ -220,11 +220,23 @@ export default function DashboardPage() {
           </section>
 
           <section className="grid gap-4 xl:grid-cols-4">
-            <WidgetCard title="Smart insights" description="Plain-English guidance from synced data.">
+            <WidgetCard
+              title="Smart insights"
+              description="Plain-English guidance from synced data."
+              action={
+                <button
+                  type="button"
+                  onClick={() => router.push("/insights")}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition-colors duration-150 hover:border-slate-400 hover:bg-slate-50"
+                >
+                  View all
+                </button>
+              }
+            >
               {visibleInsights.length === 0 ? (
                 <p className="text-sm text-slate-500">No active insights.</p>
               ) : (
-                <div className="space-y-2">
+                <div className="max-h-[520px] space-y-2 overflow-auto pr-1">
                   {visibleInsights.map((insight) => (
                     <SmartInsightItemCard
                       key={insight.id}
@@ -242,9 +254,9 @@ export default function DashboardPage() {
                   detail="Connect a bank to import balances, transactions, and automatic sync updates."
                 />
               ) : (
-                <ul className="space-y-3 text-sm">
+                <ul className="max-h-[520px] space-y-3 overflow-auto pr-1 text-sm">
                   {data.linkedAccounts.map((account) => (
-                    <li key={account.id} className="rounded-xl border border-slate-200 px-3 py-3">
+                    <li key={account.id} className="rounded-xl border border-slate-200 px-3 py-2.5">
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-1">
                           <p className="font-semibold text-slate-900">{account.name}</p>
@@ -285,11 +297,23 @@ export default function DashboardPage() {
                 </ul>
               )}
             </WidgetCard>
-            <WidgetCard title="Recent account activity" description="Latest synced Plaid transactions.">
+            <WidgetCard
+              title="Recent account activity"
+              description="Latest synced Plaid transactions."
+              action={
+                <button
+                  type="button"
+                  onClick={() => router.push("/transactions")}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition-colors duration-150 hover:border-slate-400 hover:bg-slate-50"
+                >
+                  View all
+                </button>
+              }
+            >
               {data.recentAccountActivity.length === 0 ? (
                 <EmptyState title="No recent activity" detail="Run a sync after connecting a bank to populate recent account activity." />
               ) : (
-                <ul className="space-y-2 text-sm">
+                <ul className="max-h-[520px] space-y-2 overflow-auto pr-1 text-sm">
                   {data.recentAccountActivity.map((item) => (
                     <li key={item.id} className="rounded-md border border-slate-200 px-3 py-2">
                       <div className="flex items-center justify-between gap-3">
@@ -297,7 +321,7 @@ export default function DashboardPage() {
                           <p className="font-medium text-slate-800">{item.merchant}</p>
                           <p className="text-xs text-slate-500">{item.date} - {item.account}</p>
                         </div>
-                        <span className="font-medium text-slate-900">{formatCurrencyAmount(item.amount)}</span>
+                        <span className="font-medium text-slate-900 tabular-nums">{formatCurrencyAmount(item.amount)}</span>
                       </div>
                     </li>
                   ))}
