@@ -1,3 +1,5 @@
+import { PDFParse } from "pdf-parse";
+
 type ParsedStatementTransaction = {
   date?: Date;
   description: string;
@@ -64,65 +66,103 @@ function parseDateToken(token: string, defaultYear = new Date().getUTCFullYear()
 }
 
 async function extractPdfText(buffer: Buffer) {
-  ensurePromiseWithResolversPolyfill();
-
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const task = pdfjs.getDocument({ data: new Uint8Array(buffer) });
-  const doc = await task.promise;
+  const errors: string[] = [];
 
   try {
-    const pages: string[] = [];
-    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
-      const page = await doc.getPage(pageNumber);
-      const content = await page.getTextContent();
-      const items = (content.items ?? []) as unknown[];
+    const parser = new PDFParse({ data: buffer });
+    const result = await parser.getText();
+    await parser.destroy();
 
-      const positioned: Array<{ text: string; x: number; y: number }> = [];
-      for (const item of items) {
-        const candidate = item as Partial<PdfTextItem>;
-        const text = typeof candidate.str === "string" ? candidate.str : "";
-        if (!text.trim()) continue;
-        const transform = Array.isArray(candidate.transform) ? candidate.transform : undefined;
-        const x = typeof transform?.[4] === "number" ? transform[4] : 0;
-        const y = typeof transform?.[5] === "number" ? transform[5] : 0;
-        positioned.push({ text, x, y });
-      }
-
-      // Sort visually: top-to-bottom, then left-to-right.
-      positioned.sort((a, b) => (b.y - a.y) || (a.x - b.x));
-
-      const lines: string[] = [];
-      let currentY: number | null = null;
-      let currentLine: string[] = [];
-
-      for (const item of positioned) {
-        if (currentY === null) {
-          currentY = item.y;
-          currentLine.push(item.text);
-          continue;
-        }
-
-        const sameLine = Math.abs(item.y - currentY) <= 2;
-        if (sameLine) {
-          currentLine.push(item.text);
-        } else {
-          const line = currentLine.join(" ").replace(/\s+/g, " ").trim();
-          if (line) lines.push(line);
-          currentLine = [item.text];
-          currentY = item.y;
-        }
-      }
-
-      const last = currentLine.join(" ").replace(/\s+/g, " ").trim();
-      if (last) lines.push(last);
-
-      pages.push(lines.join("\n"));
+    const text = normalizeExtractedText(result.text ?? "");
+    if (text) {
+      console.info("statement-pdf-parser: extracted text with pdf-parse", {
+        pages: result.pages?.length ?? undefined,
+        length: text.length,
+      });
+      return text;
     }
 
-    return normalizeExtractedText(pages.join("\n"));
-  } finally {
-    await doc.destroy();
+    errors.push("pdf-parse returned empty text");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("statement-pdf-parser: pdf-parse extraction failed", error);
+    errors.push(`pdf-parse: ${message}`);
   }
+
+  ensurePromiseWithResolversPolyfill();
+
+  try {
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const task = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+    const doc = await task.promise;
+    const pages: string[] = [];
+    try {
+      for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
+        const page = await doc.getPage(pageNumber);
+        const content = await page.getTextContent();
+        const items = (content.items ?? []) as unknown[];
+
+        const positioned: Array<{ text: string; x: number; y: number }> = [];
+        for (const item of items) {
+          const candidate = item as Partial<PdfTextItem>;
+          const text = typeof candidate.str === "string" ? candidate.str : "";
+          if (!text.trim()) continue;
+          const transform = Array.isArray(candidate.transform) ? candidate.transform : undefined;
+          const x = typeof transform?.[4] === "number" ? transform[4] : 0;
+          const y = typeof transform?.[5] === "number" ? transform[5] : 0;
+          positioned.push({ text, x, y });
+        }
+
+        // Sort visually: top-to-bottom, then left-to-right.
+        positioned.sort((a, b) => (b.y - a.y) || (a.x - b.x));
+
+        const lines: string[] = [];
+        let currentY: number | null = null;
+        let currentLine: string[] = [];
+
+        for (const item of positioned) {
+          if (currentY === null) {
+            currentY = item.y;
+            currentLine.push(item.text);
+            continue;
+          }
+
+          const sameLine = Math.abs(item.y - currentY) <= 2;
+          if (sameLine) {
+            currentLine.push(item.text);
+          } else {
+            const line = currentLine.join(" ").replace(/\s+/g, " ").trim();
+            if (line) lines.push(line);
+            currentLine = [item.text];
+            currentY = item.y;
+          }
+        }
+
+        const last = currentLine.join(" ").replace(/\s+/g, " ").trim();
+        if (last) lines.push(last);
+
+        pages.push(lines.join("\n"));
+      }
+    } finally {
+      await doc.destroy();
+    }
+
+    const text = normalizeExtractedText(pages.join("\n"));
+    if (text) {
+      console.info("statement-pdf-parser: extracted text with pdfjs-dist", {
+        length: text.length,
+      });
+      return text;
+    }
+
+    errors.push("pdfjs-dist returned empty text");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("statement-pdf-parser: pdfjs-dist extraction failed", error);
+    errors.push(`pdfjs-dist: ${message}`);
+  }
+
+  throw new Error(errors.join(" | "));
 }
 
 function detectStatementPeriod(text: string): { start?: Date; end?: Date } {
