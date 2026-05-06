@@ -1,0 +1,15 @@
+ALTER TYPE "TransactionSource" ADD VALUE IF NOT EXISTS 'SPREADSHEET_IMPORT';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'StatementImportKind') THEN
+    CREATE TYPE "StatementImportKind" AS ENUM ('PDF', 'SPREADSHEET');
+  END IF;
+END $$;
+
+ALTER TABLE "StatementImport"
+  ADD COLUMN IF NOT EXISTS "importKind" "StatementImportKind" NOT NULL DEFAULT 'PDF',
+  ADD COLUMN IF NOT EXISTS "sourceSheet" TEXT,
+  ADD COLUMN IF NOT EXISTS "columnHeaders" JSONB,
+  ADD COLUMN IF NOT EXISTS "columnMapping" JSONB,
+  ADD COLUMN IF NOT EXISTS "rawRows" JSONB;

@@ -9,7 +9,12 @@ import { DataSurface, EmptyState, ErrorState, LoadingState } from "@/components/
 import { WidgetCard } from "@/components/ui/widget-card";
 import { appApi } from "@/lib/services/app-api-client";
 import { formatCurrencyAmount } from "@/lib/utils/format";
-import type { StatementImportHistoryItem, StatementImportPreview } from "@/types/contracts";
+import type {
+  ImportKind,
+  SpreadsheetImportMapping,
+  StatementImportHistoryItem,
+  StatementImportPreview,
+} from "@/types/contracts";
 
 type SettingsDraft = {
   emailAlerts: boolean;
@@ -24,6 +29,21 @@ const DEFAULT_SETTINGS: SettingsDraft = {
   weeklyRecap: true,
   timezone: "America/New_York",
 };
+const MAX_IMPORT_SIZE_BYTES = 10 * 1024 * 1024;
+
+const SPREADSHEET_FIELD_LABELS: Array<{
+  key: keyof SpreadsheetImportMapping;
+  label: string;
+}> = [
+  { key: "dateColumn", label: "Date column" },
+  { key: "descriptionColumn", label: "Description column" },
+  { key: "merchantColumn", label: "Merchant column" },
+  { key: "amountColumn", label: "Amount column" },
+  { key: "debitColumn", label: "Debit column" },
+  { key: "creditColumn", label: "Credit column" },
+  { key: "directionColumn", label: "Direction column" },
+  { key: "accountColumn", label: "Account column" },
+];
 
 function readStoredSettings(): SettingsDraft {
   if (typeof window === "undefined") return DEFAULT_SETTINGS;
@@ -42,6 +62,31 @@ function readStoredSettings(): SettingsDraft {
   }
 }
 
+function looksLikePdfFile(file: File) {
+  return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+}
+
+function looksLikeSpreadsheetFile(file: File) {
+  return (
+    /\.(xlsx|xls|csv)$/i.test(file.name)
+    || [
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+      "text/csv",
+      "application/csv",
+      "text/plain",
+    ].includes(file.type)
+  );
+}
+
+function importKindLabel(importKind: ImportKind) {
+  return importKind === "spreadsheet" ? "Spreadsheet" : "Statement PDF";
+}
+
+function importSourceLabel(importKind: ImportKind) {
+  return importKind === "spreadsheet" ? "spreadsheet_import" : "statement_pdf";
+}
+
 export default function SettingsPage() {
   const { pushToast } = useToast();
   const [draft, setDraft] = useState<SettingsDraft>(DEFAULT_SETTINGS);
@@ -57,6 +102,7 @@ export default function SettingsPage() {
   const [statementUploadSuccess, setStatementUploadSuccess] = useState<string | null>(null);
   const [statementPreview, setStatementPreview] = useState<StatementImportPreview | null>(null);
   const [selectedEntryIds, setSelectedEntryIds] = useState<string[]>([]);
+  const [spreadsheetMappingDraft, setSpreadsheetMappingDraft] = useState<SpreadsheetImportMapping>({});
   const [showFinancialResetConfirmation, setShowFinancialResetConfirmation] = useState(false);
   const [financialResetConfirmation, setFinancialResetConfirmation] = useState("");
   const [financialResetLoading, setFinancialResetLoading] = useState(false);
@@ -76,11 +122,14 @@ export default function SettingsPage() {
 
   const isDirty = useMemo(
     () =>
-      draft.emailAlerts !== saved.emailAlerts ||
-      draft.weeklyRecap !== saved.weeklyRecap ||
-      draft.timezone !== saved.timezone,
+      draft.emailAlerts !== saved.emailAlerts
+      || draft.weeklyRecap !== saved.weeklyRecap
+      || draft.timezone !== saved.timezone,
     [draft, saved],
   );
+
+  const isSpreadsheetPreview = statementPreview?.importKind === "spreadsheet";
+  const spreadsheetColumns = isSpreadsheetPreview ? (statementPreview?.spreadsheetColumns ?? []) : [];
 
   async function loadStatementHistory() {
     setStatementHistoryLoading(true);
@@ -88,11 +137,18 @@ export default function SettingsPage() {
       const response = await appApi.getStatementImportHistory();
       setStatementHistory(Array.isArray(response.items) ? response.items : []);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unable to load statement import history.";
+      const message = err instanceof Error ? err.message : "Unable to load import history.";
       setStatementUploadError(message);
     } finally {
       setStatementHistoryLoading(false);
     }
+  }
+
+  function applyPreviewState(preview: StatementImportPreview, successMessage?: string) {
+    setStatementPreview(preview);
+    setSelectedEntryIds(preview.transactions.filter((item) => !item.duplicateTransactionId).map((item) => item.id));
+    setSpreadsheetMappingDraft(preview.spreadsheetMapping ?? {});
+    if (successMessage) setStatementUploadSuccess(successMessage);
   }
 
   async function handleSave() {
@@ -135,7 +191,6 @@ export default function SettingsPage() {
 
     if (label.includes("reset")) {
       handleReset();
-      return;
     }
   }
 
@@ -154,12 +209,12 @@ export default function SettingsPage() {
     setStatementUploadError(null);
     setStatementUploadSuccess(null);
 
-    if (file.type !== "application/pdf") {
+    if (!looksLikePdfFile(file)) {
       setStatementUploadError("Only PDF statements are supported.");
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
+    if (file.size > MAX_IMPORT_SIZE_BYTES) {
       setStatementUploadError("PDF file must be smaller than 10 MB.");
       return;
     }
@@ -168,15 +223,73 @@ export default function SettingsPage() {
 
     try {
       const response = await appApi.uploadStatementPdf(file);
-      setStatementPreview(response.importPreview);
-      setSelectedEntryIds(response.importPreview.transactions.filter((item) => !item.duplicateTransactionId).map((item) => item.id));
-      setStatementUploadSuccess("Statement uploaded. Review extracted transactions before importing.");
+      applyPreviewState(response.importPreview, "Statement uploaded. Review extracted transactions before importing.");
       pushToast({ title: "Statement ready", message: "Review extracted transactions before importing them.", variant: "success" });
       await loadStatementHistory();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to process the uploaded statement.";
       setStatementUploadError(message);
       pushToast({ title: "Upload failed", message, variant: "error" });
+    } finally {
+      setStatementActionLoading(false);
+    }
+  }
+
+  async function handleSpreadsheetUpload(file: File | null) {
+    if (!file) return;
+
+    setStatementUploadError(null);
+    setStatementUploadSuccess(null);
+
+    if (!looksLikeSpreadsheetFile(file)) {
+      setStatementUploadError("Only XLS, XLSX, and CSV files are supported for spreadsheet import.");
+      return;
+    }
+
+    if (file.size > MAX_IMPORT_SIZE_BYTES) {
+      setStatementUploadError("Spreadsheet file must be smaller than 10 MB.");
+      return;
+    }
+
+    setStatementActionLoading(true);
+
+    try {
+      const response = await appApi.uploadSpreadsheetFile(file);
+      applyPreviewState(response.importPreview, "Spreadsheet uploaded. Review column mapping and extracted transactions before importing.");
+      pushToast({
+        title: "Spreadsheet ready",
+        message: "Review the column mapping and extracted transactions before importing them.",
+        variant: "success",
+      });
+      await loadStatementHistory();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to process the uploaded spreadsheet.";
+      setStatementUploadError(message);
+      pushToast({ title: "Upload failed", message, variant: "error" });
+    } finally {
+      setStatementActionLoading(false);
+    }
+  }
+
+  async function handleSpreadsheetRemap() {
+    if (!statementPreview || statementPreview.importKind !== "spreadsheet") return;
+
+    setStatementActionLoading(true);
+    setStatementUploadError(null);
+
+    try {
+      const response = await appApi.remapStatementImport(statementPreview.id, spreadsheetMappingDraft);
+      applyPreviewState(response.importPreview, "Spreadsheet preview refreshed. Review the updated transactions before importing.");
+      pushToast({
+        title: "Preview updated",
+        message: "Spreadsheet mapping was applied to the import preview.",
+        variant: "success",
+      });
+      await loadStatementHistory();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to refresh the spreadsheet preview.";
+      setStatementUploadError(message);
+      pushToast({ title: "Mapping failed", message, variant: "error" });
     } finally {
       setStatementActionLoading(false);
     }
@@ -189,16 +302,16 @@ export default function SettingsPage() {
 
     try {
       const response = await appApi.finalizeStatementImport(statementPreview.id, selectedEntryIds);
-      setStatementPreview(response.importPreview);
-      setStatementUploadSuccess(`${response.importedCount} transactions imported from the statement.`);
+      applyPreviewState(response.importPreview);
+      setStatementUploadSuccess(`${response.importedCount} transactions imported from the ${statementPreview.importKind === "spreadsheet" ? "spreadsheet" : "statement"}.`);
       pushToast({
-        title: "Statement imported",
-        message: `${response.importedCount} transactions were added as statement_pdf imports.`,
+        title: `${importKindLabel(statementPreview.importKind)} imported`,
+        message: `${response.importedCount} transactions were added as ${importSourceLabel(statementPreview.importKind)} imports.`,
         variant: "success",
       });
       await loadStatementHistory();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unable to import statement transactions.";
+      const message = err instanceof Error ? err.message : "Unable to import transactions.";
       setStatementUploadError(message);
       pushToast({ title: "Import failed", message, variant: "error" });
     } finally {
@@ -213,10 +326,11 @@ export default function SettingsPage() {
 
     try {
       await appApi.cancelStatementImport(statementPreview.id);
-      setStatementUploadSuccess("Statement import cancelled.");
+      setStatementUploadSuccess(`${importKindLabel(statementPreview.importKind)} import cancelled.`);
       setStatementPreview(null);
       setSelectedEntryIds([]);
-      pushToast({ title: "Import cancelled", message: "The statement preview was cleared without importing transactions.", variant: "info" });
+      setSpreadsheetMappingDraft({});
+      pushToast({ title: "Import cancelled", message: "The import preview was cleared without importing transactions.", variant: "info" });
       await loadStatementHistory();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to cancel this import.";
@@ -246,6 +360,7 @@ export default function SettingsPage() {
       const response = await appApi.resetFinancialData(financialResetConfirmation);
       setStatementPreview(null);
       setSelectedEntryIds([]);
+      setSpreadsheetMappingDraft({});
       setStatementHistory([]);
       setStatementUploadError(null);
       setStatementUploadSuccess(null);
@@ -254,7 +369,7 @@ export default function SettingsPage() {
       await loadStatementHistory();
 
       const summary = response.summary;
-      const message = `Removed ${summary.transactionsDeleted} transactions, ${summary.bankConnectionsDeleted} bank connections, ${summary.statementImportsDeleted} statement imports, and ${summary.budgetsDeleted} budgets.`;
+      const message = `Removed ${summary.transactionsDeleted} transactions, ${summary.bankConnectionsDeleted} bank connections, ${summary.statementImportsDeleted} imports, and ${summary.budgetsDeleted} budgets.`;
       setFinancialResetSuccess(message);
       pushToast({
         title: "Financial data cleared",
@@ -288,7 +403,7 @@ export default function SettingsPage() {
   return (
     <PageShell
       title="Settings"
-      description="Manage local preferences and account actions."
+      description="Manage local preferences, recovery options, and import workflows."
       selectedRange="Preferences"
       actions={actions}
       onActionClick={(action) => void handleAction(action)}
@@ -370,45 +485,78 @@ export default function SettingsPage() {
         </section>
 
         <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-          <WidgetCard
-            title="Bank Statement Upload"
-            description="Use this if Plaid is unavailable or if you prefer not to connect your bank account directly."
-          >
-            <div className="space-y-4 text-sm">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-600">
-                Upload a PDF bank or credit card statement to extract transactions, review them, and import only what you approve.
+          <div className="space-y-4">
+            <WidgetCard
+              title="Bank Statement Upload"
+              description="Use this if Plaid is unavailable or if you prefer not to connect your bank account directly."
+            >
+              <div className="space-y-4 text-sm">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-600">
+                  Upload a PDF bank or credit card statement to extract transactions, review them, and import only what you approve.
+                </div>
+
+                <label className="block">
+                  <span className="text-slate-600">Statement PDF</span>
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+                    onChange={(event) => void handleStatementUpload(event.target.files?.[0] ?? null)}
+                    disabled={statementActionLoading}
+                  />
+                </label>
+
+                <p className="text-xs text-slate-500">
+                  PDF only. Maximum file size: 10 MB. Statement imports are labeled separately from Plaid activity.
+                </p>
               </div>
+            </WidgetCard>
 
-              <label className="block">
-                <span className="text-slate-600">Statement PDF</span>
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-                  onChange={(event) => void handleStatementUpload(event.target.files?.[0] ?? null)}
-                  disabled={statementActionLoading}
-                />
-              </label>
+            <WidgetCard
+              title="Spreadsheet Upload"
+              description="Upload exported bank data if you prefer structured imports over statement PDFs."
+            >
+              <div className="space-y-4 text-sm">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-600">
+                  Upload an XLS, XLSX, or CSV file, map the columns, preview the extracted transactions, and import only the rows you approve.
+                </div>
 
-              <p className="text-xs text-slate-500">
-                PDF only. Maximum file size: 10 MB. Statement imports are labeled separately from Plaid activity.
-              </p>
-            </div>
-          </WidgetCard>
+                <label className="block">
+                  <span className="text-slate-600">Spreadsheet file</span>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+                    onChange={(event) => void handleSpreadsheetUpload(event.target.files?.[0] ?? null)}
+                    disabled={statementActionLoading}
+                  />
+                </label>
 
-          <WidgetCard title="Import history" description="Recent statement uploads and import outcomes.">
+                <p className="text-xs text-slate-500">
+                  Supported formats: XLS, XLSX, and CSV. Maximum file size: 10 MB. Spreadsheet imports are labeled separately in Transactions.
+                </p>
+              </div>
+            </WidgetCard>
+          </div>
+
+          <WidgetCard title="Import history" description="Recent statement and spreadsheet uploads with their import outcomes.">
             {statementHistoryLoading ? (
-              <LoadingState label="Loading statement import history..." />
+              <LoadingState label="Loading import history..." />
             ) : statementHistory.length === 0 ? (
               <EmptyState
-                title="No statement imports yet"
-                detail="Upload a PDF statement here if Plaid is unavailable or you prefer an offline import workflow."
+                title="No imports yet"
+                detail="Upload a PDF statement or spreadsheet here if Plaid is unavailable or you prefer an offline import workflow."
               />
             ) : (
               <div className="space-y-2 text-sm">
                 {statementHistory.map((item) => (
                   <div key={item.id} className="rounded-xl border border-slate-200 px-3 py-3">
-                    <p className="font-medium text-slate-900">{item.filename}</p>
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="font-medium text-slate-900">{item.filename}</p>
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-slate-600">
+                        {importKindLabel(item.importKind)}
+                      </span>
+                    </div>
                     <p className="mt-1 text-xs text-slate-500">
                       Uploaded {new Date(item.uploadedAt).toLocaleString()} | {item.statementPeriodLabel}
                     </p>
@@ -425,9 +573,20 @@ export default function SettingsPage() {
 
         {statementPreview ? (
           <section>
-            <WidgetCard title="Review extracted transactions" description="Confirm these statement transactions before importing them into LedgerScope.">
+            <WidgetCard
+              title={statementPreview.importKind === "spreadsheet" ? "Review spreadsheet import" : "Review extracted transactions"}
+              description={
+                statementPreview.importKind === "spreadsheet"
+                  ? "Confirm the column mapping and extracted rows before importing them into LedgerScope."
+                  : "Confirm these statement transactions before importing them into LedgerScope."
+              }
+            >
               <div className="space-y-4 text-sm">
                 <div className="grid gap-3 md:grid-cols-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Import type</p>
+                    <p className="mt-1 font-medium text-slate-900">{importKindLabel(statementPreview.importKind)}</p>
+                  </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <p className="text-xs uppercase tracking-[0.12em] text-slate-500">File</p>
                     <p className="mt-1 font-medium text-slate-900">{statementPreview.filename}</p>
@@ -437,6 +596,24 @@ export default function SettingsPage() {
                     <p className="mt-1 font-medium text-slate-900">{statementPreview.accountLabel ?? "Not detected"}</p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Parser confidence</p>
+                    <p className="mt-1 font-medium text-slate-900">{Math.round(statementPreview.parserConfidence * 100)}%</p>
+                  </div>
+                </div>
+
+                {statementPreview.importKind === "spreadsheet" ? (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Source sheet</p>
+                      <p className="mt-1 font-medium text-slate-900">{statementPreview.sourceSheet ?? "First sheet"}</p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Detected rows</p>
+                      <p className="mt-1 font-medium text-slate-900">{statementPreview.detectedTransactionCount}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Statement period</p>
                     <p className="mt-1 font-medium text-slate-900">
                       {statementPreview.statementPeriodStart && statementPreview.statementPeriodEnd
@@ -444,11 +621,7 @@ export default function SettingsPage() {
                         : "Not detected"}
                     </p>
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Parser confidence</p>
-                    <p className="mt-1 font-medium text-slate-900">{Math.round(statementPreview.parserConfidence * 100)}%</p>
-                  </div>
-                </div>
+                )}
 
                 {statementPreview.parserMessage ? (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800">
@@ -456,10 +629,68 @@ export default function SettingsPage() {
                   </div>
                 ) : null}
 
+                {isSpreadsheetPreview && spreadsheetColumns.length > 0 ? (
+                  <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Column mapping</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Adjust the spreadsheet columns below, then refresh the preview before importing.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      {SPREADSHEET_FIELD_LABELS.map((field) => (
+                        <label key={field.key} className="block">
+                          <span className="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">{field.label}</span>
+                          <select
+                            value={spreadsheetMappingDraft[field.key] ?? ""}
+                            onChange={(event) => setSpreadsheetMappingDraft((current) => ({
+                              ...current,
+                              [field.key]: event.target.value || undefined,
+                            }))}
+                            className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+                            disabled={statementActionLoading}
+                          >
+                            <option value="">Not mapped</option>
+                            {spreadsheetColumns.map((column) => (
+                              <option key={`${field.key}-${column}`} value={column}>
+                                {column}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void handleSpreadsheetRemap()}
+                        disabled={statementActionLoading}
+                        className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors duration-150 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {statementActionLoading ? "Refreshing preview..." : "Refresh preview"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSpreadsheetMappingDraft(statementPreview.spreadsheetMapping ?? {})}
+                        disabled={statementActionLoading}
+                        className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors duration-150 hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Reset mapping
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
                 {statementPreview.transactions.length === 0 ? (
                   <EmptyState
                     title="No transactions extracted"
-                    detail="We could not confidently detect transactions from this PDF. Try a digitally generated statement if available."
+                    detail={
+                      statementPreview.importKind === "spreadsheet"
+                        ? "We could not confidently detect transactions from this spreadsheet. Adjust the column mapping and try again."
+                        : "We could not confidently detect transactions from this PDF. Try a digitally generated statement if available."
+                    }
                   />
                 ) : (
                   <div className="overflow-hidden rounded-2xl border border-slate-200">
@@ -531,7 +762,7 @@ export default function SettingsPage() {
                     Cancel import
                   </button>
                   <p className="text-xs text-slate-500">
-                    Imported transactions are labeled as <span className="font-medium text-slate-700">statement_pdf</span> and duplicate candidates are skipped automatically.
+                    Imported transactions are labeled as <span className="font-medium text-slate-700">{importSourceLabel(statementPreview.importKind)}</span> and duplicate candidates are skipped automatically.
                   </p>
                 </div>
               </div>
@@ -542,12 +773,12 @@ export default function SettingsPage() {
         <section>
           <WidgetCard
             title="Reset financial data"
-            description="Clear synced and imported financial data if incorrect transactions, budgets, or statement imports were added."
+            description="Clear synced and imported financial data if incorrect transactions, budgets, or uploads were added."
           >
             <div className="space-y-4 text-sm">
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800">
                 This removes financial records only. Your login, account profile, and local settings stay in place. Connected banks, transactions,
-                budgets, exports, watchlist rules, statement imports, and generated insights will be deleted.
+                budgets, exports, watchlist rules, statement imports, spreadsheet imports, and generated insights will be deleted.
               </div>
 
               {!showFinancialResetConfirmation ? (

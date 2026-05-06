@@ -213,7 +213,7 @@ export type TransactionPurpose = "personal" | "business" | "split" | "uncertain"
 export type TransactionStatus = "pending" | "posted";
 export type ReviewStatus = "unreviewed" | "reviewed";
 export type SplitMethod = "percentage" | "amount";
-export type TransactionSource = "plaid" | "statement_pdf" | "manual";
+export type TransactionSource = "plaid" | "statement_pdf" | "spreadsheet_import" | "manual";
 
 export type ExpenseTag =
   | "vacation"
@@ -610,12 +610,29 @@ export type StatementImportEntryPreview = {
   selectedForImport: boolean;
 };
 
+export type SpreadsheetImportMapping = {
+  dateColumn?: string;
+  descriptionColumn?: string;
+  merchantColumn?: string;
+  amountColumn?: string;
+  debitColumn?: string;
+  creditColumn?: string;
+  directionColumn?: string;
+  accountColumn?: string;
+};
+
+export type ImportKind = "statement_pdf" | "spreadsheet";
+
 export type StatementImportPreview = {
   id: string;
+  importKind: ImportKind;
   filename: string;
   fileSize: number;
   mimeType: string;
   accountLabel?: string;
+  sourceSheet?: string;
+  spreadsheetColumns?: string[];
+  spreadsheetMapping?: SpreadsheetImportMapping;
   statementPeriodStart?: string;
   statementPeriodEnd?: string;
   parserStatus: "parsed" | "needs_review" | "failed" | "imported" | "cancelled";
@@ -630,6 +647,7 @@ export type StatementImportPreview = {
 
 export type StatementImportHistoryItem = {
   id: string;
+  importKind: ImportKind;
   filename: string;
   uploadedAt: string;
   statementPeriodLabel: string;
@@ -645,6 +663,10 @@ export type StatementImportUploadResponse = {
 export type StatementImportFinalizeResponse = {
   importPreview: StatementImportPreview;
   importedCount: number;
+};
+
+export type StatementImportRemapResponse = {
+  importPreview: StatementImportPreview;
 };
 
 export type StatementImportHistoryResponse = {

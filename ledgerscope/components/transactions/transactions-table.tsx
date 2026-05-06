@@ -24,12 +24,14 @@ function suspiciousBadgeClass(isSuspicious: boolean) {
 
 function sourceBadgeClass(source: TransactionRecord["source"]) {
   if (source === "statement_pdf") return "bg-amber-50 text-amber-700 border-amber-200";
+  if (source === "spreadsheet_import") return "bg-sky-50 text-sky-700 border-sky-200";
   if (source === "manual") return "bg-sky-50 text-sky-700 border-sky-200";
   return "bg-emerald-50 text-emerald-700 border-emerald-200";
 }
 
 function sourceLabel(source: TransactionRecord["source"]) {
   if (source === "statement_pdf") return "Statement PDF";
+  if (source === "spreadsheet_import") return "Spreadsheet";
   if (source === "manual") return "Manual";
   return "Plaid";
 }

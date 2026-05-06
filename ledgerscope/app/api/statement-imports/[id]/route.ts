@@ -1,12 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUserId } from "@/lib/auth/session";
-import { cancelStatementImport, finalizeStatementImport, getStatementImportPreview } from "@/lib/db/statement-import-store";
+import {
+  cancelStatementImport,
+  finalizeStatementImport,
+  getStatementImportPreview,
+  remapSpreadsheetImport,
+} from "@/lib/db/statement-import-store";
 
-const finalizeSchema = z.object({
-  action: z.enum(["confirm", "cancel"]),
-  selectedEntryIds: z.array(z.string().min(1)).optional(),
+const spreadsheetMappingSchema = z.object({
+  dateColumn: z.string().min(1).optional(),
+  descriptionColumn: z.string().min(1).optional(),
+  merchantColumn: z.string().min(1).optional(),
+  amountColumn: z.string().min(1).optional(),
+  debitColumn: z.string().min(1).optional(),
+  creditColumn: z.string().min(1).optional(),
+  directionColumn: z.string().min(1).optional(),
+  accountColumn: z.string().min(1).optional(),
 });
+
+const finalizeSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("confirm"),
+    selectedEntryIds: z.array(z.string().min(1)).optional(),
+  }),
+  z.object({
+    action: z.literal("cancel"),
+  }),
+  z.object({
+    action: z.literal("remap"),
+    mapping: spreadsheetMappingSchema,
+  }),
+]);
 
 // This route relies on Node primitives (JSON parsing + Prisma) and should not run on Edge.
 export const runtime = "nodejs";
@@ -42,6 +67,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
       const ok = await cancelStatementImport(userId, id);
       if (!ok) return NextResponse.json({ error: "Statement import not found." }, { status: 404 });
       return NextResponse.json({ ok: true });
+    }
+
+    if (payload.action === "remap") {
+      const result = await remapSpreadsheetImport(userId, id, payload.mapping);
+      if (!result) return NextResponse.json({ error: "Spreadsheet import not found." }, { status: 404 });
+      return NextResponse.json(result);
     }
 
     const result = await finalizeStatementImport(userId, id, payload.selectedEntryIds);

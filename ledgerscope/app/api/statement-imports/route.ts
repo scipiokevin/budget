@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserId } from "@/lib/auth/session";
-import { createStatementImportFromPdf, getStatementImportHistory } from "@/lib/db/statement-import-store";
+import {
+  createStatementImportFromPdf,
+  createStatementImportFromSpreadsheet,
+  getStatementImportHistory,
+} from "@/lib/db/statement-import-store";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const SPREADSHEET_EXTENSIONS = /\.(xlsx|xls|csv)$/i;
+const SPREADSHEET_MIME_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/csv",
+  "application/csv",
+  "text/plain",
+]);
 
 // This route relies on Node primitives (Buffer) for PDF parsing.
 export const runtime = "nodejs";
@@ -24,6 +36,10 @@ function isUploadedStatementFile(value: FormDataEntryValue | null): value is Fil
 
 function looksLikePdf(file: File) {
   return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+}
+
+function looksLikeSpreadsheet(file: File) {
+  return SPREADSHEET_MIME_TYPES.has(file.type) || SPREADSHEET_EXTENSIONS.test(file.name);
 }
 
 export async function GET() {
@@ -51,34 +67,42 @@ export async function POST(request: NextRequest) {
       console.error("Statement import upload rejected: invalid file payload", {
         receivedType: file === null ? "null" : typeof file,
       });
-      return NextResponse.json({ error: "A PDF file is required." }, { status: 400 });
+        return NextResponse.json({ error: "A PDF, XLS, XLSX, or CSV file is required." }, { status: 400 });
     }
 
-    if (!looksLikePdf(file)) {
-      return NextResponse.json({ error: "Only PDF statements are supported." }, { status: 400 });
+    const isPdf = looksLikePdf(file);
+    const isSpreadsheet = looksLikeSpreadsheet(file);
+
+    if (!isPdf && !isSpreadsheet) {
+      return NextResponse.json({ error: "Only PDF, XLS, XLSX, and CSV imports are supported." }, { status: 400 });
     }
 
     if (file.size <= 0 || file.size > MAX_FILE_SIZE_BYTES) {
-      return NextResponse.json({ error: "PDF file must be smaller than 10 MB." }, { status: 400 });
+      return NextResponse.json({ error: "Import files must be smaller than 10 MB." }, { status: 400 });
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    console.info("Statement import upload received", {
+    console.info("Import upload received", {
       userId,
       filename: file.name,
       mimeType: file.type,
       size: file.size,
     });
-    const response = await createStatementImportFromPdf(userId, {
+    const response = await (isPdf ? createStatementImportFromPdf(userId, {
       filename: file.name,
       mimeType: file.type || "application/pdf",
       size: file.size,
       buffer: Buffer.from(arrayBuffer),
-    });
+    }) : createStatementImportFromSpreadsheet(userId, {
+      filename: file.name,
+      mimeType: file.type || "application/octet-stream",
+      size: file.size,
+      buffer: Buffer.from(arrayBuffer),
+    }));
 
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
-    console.error("Statement import upload failed", error);
-    return NextResponse.json({ error: "Failed to process the uploaded statement." }, { status: 500 });
+    console.error("Import upload failed", error);
+    return NextResponse.json({ error: "Failed to process the uploaded file." }, { status: 500 });
   }
 }

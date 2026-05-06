@@ -39,7 +39,7 @@ type PrismaCashFlowType =
 type PrismaReviewStatus = "UNREVIEWED" | "REVIEWED" | "NEEDS_REVIEW";
 type PrismaTransactionPurpose = "PERSONAL" | "BUSINESS" | "SPLIT" | "UNCERTAIN";
 type PrismaTransactionStatus = "PENDING" | "POSTED" | "REMOVED";
-type PrismaTransactionSource = "PLAID" | "STATEMENT_PDF" | "MANUAL";
+type PrismaTransactionSource = "PLAID" | "STATEMENT_PDF" | "SPREADSHEET_IMPORT" | "MANUAL";
 
 type StringFilter = {
   equals?: string;
@@ -137,8 +137,9 @@ const TRANSACTION_STATUS = {
 const TRANSACTION_SOURCE = {
   PLAID: "PLAID",
   STATEMENT_PDF: "STATEMENT_PDF",
+  SPREADSHEET_IMPORT: "SPREADSHEET_IMPORT",
   MANUAL: "MANUAL",
-} as const satisfies Record<"PLAID" | "STATEMENT_PDF" | "MANUAL", PrismaTransactionSource>;
+} as const satisfies Record<"PLAID" | "STATEMENT_PDF" | "SPREADSHEET_IMPORT" | "MANUAL", PrismaTransactionSource>;
 
 function toNumber(value: DecimalLike | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
@@ -214,6 +215,8 @@ function mapSourceFromPrisma(value: PrismaTransactionSource): UiTransactionSourc
   switch (value) {
     case TRANSACTION_SOURCE.STATEMENT_PDF:
       return "statement_pdf";
+    case TRANSACTION_SOURCE.SPREADSHEET_IMPORT:
+      return "spreadsheet_import";
     case TRANSACTION_SOURCE.MANUAL:
       return "manual";
     default:

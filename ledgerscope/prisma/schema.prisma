@@ -20,7 +20,13 @@ enum TransactionDirection {
 enum TransactionSource {
   PLAID
   STATEMENT_PDF
+  SPREADSHEET_IMPORT
   MANUAL
+}
+
+enum StatementImportKind {
+  PDF
+  SPREADSHEET
 }
 
 enum TransactionPurpose {
@@ -398,10 +404,15 @@ model Transaction {
 model StatementImport {
   id                     String                 @id @default(cuid())
   userId                 String
+  importKind             StatementImportKind    @default(PDF)
   filename               String
   fileSize               Int
   mimeType               String
   accountLabel           String?
+  sourceSheet            String?
+  columnHeaders          Json?
+  columnMapping          Json?
+  rawRows                Json?
   statementPeriodStart   DateTime?
   statementPeriodEnd     DateTime?
   parserStatus           String                 @default("parsed")

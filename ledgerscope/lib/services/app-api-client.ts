@@ -14,6 +14,8 @@ import type {
   InsightsData,
   StatementImportFinalizeResponse,
   StatementImportHistoryResponse,
+  StatementImportRemapResponse,
+  SpreadsheetImportMapping,
   StatementImportUploadResponse,
   SettingsData,
   TransactionRecord,
@@ -178,10 +180,40 @@ export const appApi = {
 
     return (await response.json()) as StatementImportUploadResponse;
   },
+  uploadSpreadsheetFile: async (file: File): Promise<StatementImportUploadResponse> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch("/api/statement-imports", {
+      method: "POST",
+      body: formData,
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      let detail: string | undefined;
+
+      try {
+        const body = (await response.json()) as { error?: string };
+        detail = body.error;
+      } catch {
+        detail = undefined;
+      }
+
+      throw new Error(detail ?? "Failed to upload spreadsheet.");
+    }
+
+    return (await response.json()) as StatementImportUploadResponse;
+  },
   finalizeStatementImport: (id: string, selectedEntryIds: string[]) =>
     requestJson<StatementImportFinalizeResponse>(`/api/statement-imports/${id}`, {
       method: "POST",
       body: JSON.stringify({ action: "confirm", selectedEntryIds }),
+    }),
+  remapStatementImport: (id: string, mapping: SpreadsheetImportMapping) =>
+    requestJson<StatementImportRemapResponse>(`/api/statement-imports/${id}`, {
+      method: "POST",
+      body: JSON.stringify({ action: "remap", mapping }),
     }),
   cancelStatementImport: (id: string) =>
     requestJson<{ ok: boolean }>(`/api/statement-imports/${id}`, {

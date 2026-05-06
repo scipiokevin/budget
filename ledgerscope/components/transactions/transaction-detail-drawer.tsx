@@ -34,6 +34,7 @@ const EXPENSE_TAG_OPTIONS: ExpenseTag[] = [
 
 function sourceLabel(source: TransactionRecord["source"]) {
   if (source === "statement_pdf") return "Statement PDF";
+  if (source === "spreadsheet_import") return "Spreadsheet";
   if (source === "manual") return "Manual";
   return "Plaid";
 }
