@@ -1,5 +1,3 @@
-import { PDFParse } from "pdf-parse";
-
 type ParsedStatementTransaction = {
   date?: Date;
   description: string;
@@ -69,6 +67,7 @@ async function extractPdfText(buffer: Buffer) {
   const errors: string[] = [];
 
   try {
+    const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse({ data: buffer });
     const result = await parser.getText();
     await parser.destroy();

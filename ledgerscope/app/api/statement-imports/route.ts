@@ -7,6 +7,25 @@ const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 // This route relies on Node primitives (Buffer) for PDF parsing.
 export const runtime = "nodejs";
 
+function isUploadedStatementFile(value: FormDataEntryValue | null): value is File {
+  if (!value || typeof value !== "object") return false;
+
+  return (
+    "arrayBuffer" in value &&
+    typeof value.arrayBuffer === "function" &&
+    "name" in value &&
+    typeof value.name === "string" &&
+    "type" in value &&
+    typeof value.type === "string" &&
+    "size" in value &&
+    typeof value.size === "number"
+  );
+}
+
+function looksLikePdf(file: File) {
+  return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+}
+
 export async function GET() {
   const userId = await getCurrentUserId();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -28,11 +47,14 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get("file");
 
-    if (!(file instanceof File)) {
+    if (!isUploadedStatementFile(file)) {
+      console.error("Statement import upload rejected: invalid file payload", {
+        receivedType: file === null ? "null" : typeof file,
+      });
       return NextResponse.json({ error: "A PDF file is required." }, { status: 400 });
     }
 
-    if (file.type !== "application/pdf") {
+    if (!looksLikePdf(file)) {
       return NextResponse.json({ error: "Only PDF statements are supported." }, { status: 400 });
     }
 
@@ -41,9 +63,15 @@ export async function POST(request: NextRequest) {
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    const response = await createStatementImportFromPdf(userId, {
+    console.info("Statement import upload received", {
+      userId,
       filename: file.name,
       mimeType: file.type,
+      size: file.size,
+    });
+    const response = await createStatementImportFromPdf(userId, {
+      filename: file.name,
+      mimeType: file.type || "application/pdf",
       size: file.size,
       buffer: Buffer.from(arrayBuffer),
     });
