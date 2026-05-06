@@ -22,6 +22,10 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
   - then `prisma generate`
   - then `next build`
 - `DIRECT_DATABASE_URL` is required in Vercel so `prisma migrate deploy` can acquire the advisory lock Prisma Migrate needs.
+- Password reset email delivery requires:
+  - `RESEND_API_KEY`
+  - `EMAIL_FROM`
+- The reset link uses the current request origin, so make sure your deployed domain is correct and `NEXTAUTH_URL` is set to that same domain.
 
 ## Getting Started
 

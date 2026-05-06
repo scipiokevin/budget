@@ -75,6 +75,12 @@ export function LoginForm() {
           />
         </label>
 
+        <div className="flex justify-end">
+          <Link href="/forgot-password" className="text-sm font-medium text-slate-700 underline underline-offset-4">
+            Forgot password?
+          </Link>
+        </div>
+
         {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
         <button
