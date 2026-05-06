@@ -1,3 +1,5 @@
+import { inflateSync } from "node:zlib";
+
 type ParsedStatementTransaction = {
   date?: Date;
   description: string;
@@ -28,6 +30,42 @@ type PdfTextItem = {
   transform?: number[];
 };
 
+function decodePdfLiteralString(input: string) {
+  let output = "";
+
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index];
+
+    if (character !== "\\") {
+      output += character;
+      continue;
+    }
+
+    index += 1;
+    const escaped = input[index];
+    if (escaped === undefined) break;
+
+    if (/[0-7]/.test(escaped)) {
+      let octal = escaped;
+      while (index + 1 < input.length && octal.length < 3 && /[0-7]/.test(input[index + 1])) {
+        index += 1;
+        octal += input[index];
+      }
+      output += String.fromCharCode(Number.parseInt(octal, 8));
+      continue;
+    }
+
+    if (escaped === "n") output += "\n";
+    else if (escaped === "r") output += "\r";
+    else if (escaped === "t") output += "\t";
+    else if (escaped === "b") output += "\b";
+    else if (escaped === "f") output += "\f";
+    else output += escaped;
+  }
+
+  return output;
+}
+
 function ensurePromiseWithResolversPolyfill() {
   // pdfjs-dist uses Promise.withResolvers in newer releases; Node < 22 may not have it.
   if (typeof (Promise as unknown as { withResolvers?: unknown }).withResolvers === "function") return;
@@ -47,6 +85,35 @@ function ensurePromiseWithResolversPolyfill() {
 
 function normalizeExtractedText(text: string) {
   return text.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/[ \t]{2,}/g, " ").trim();
+}
+
+function extractPdfTextFromRawStreams(buffer: Buffer) {
+  const source = buffer.toString("latin1");
+  const streamPattern = /<<(.*?)>>\s*stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  const tokens: string[] = [];
+
+  for (const match of source.matchAll(streamPattern)) {
+    const dictionary = match[1] ?? "";
+    const rawStream = Buffer.from(match[2] ?? "", "latin1");
+
+    let decodedStream: string | null = null;
+    try {
+      decodedStream = /FlateDecode/.test(dictionary)
+        ? inflateSync(rawStream).toString("latin1")
+        : rawStream.toString("latin1");
+    } catch {
+      decodedStream = null;
+    }
+
+    if (!decodedStream || !/\bBT\b/.test(decodedStream)) continue;
+
+    for (const tokenMatch of decodedStream.matchAll(/\((?:\\.|[^\\)])*\)/g)) {
+      const decoded = decodePdfLiteralString(tokenMatch[0].slice(1, -1)).replace(/\s+/g, " ").trim();
+      if (decoded) tokens.push(decoded);
+    }
+  }
+
+  return normalizeExtractedText(tokens.join("\n"));
 }
 
 function parseDateToken(token: string, defaultYear = new Date().getUTCFullYear()): Date | undefined {
@@ -86,6 +153,22 @@ async function extractPdfText(buffer: Buffer) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("statement-pdf-parser: pdf-parse extraction failed", error);
     errors.push(`pdf-parse: ${message}`);
+  }
+
+  try {
+    const text = extractPdfTextFromRawStreams(buffer);
+    if (text) {
+      console.info("statement-pdf-parser: extracted text from raw pdf streams", {
+        length: text.length,
+      });
+      return text;
+    }
+
+    errors.push("raw pdf streams returned empty text");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("statement-pdf-parser: raw stream extraction failed", error);
+    errors.push(`raw-streams: ${message}`);
   }
 
   ensurePromiseWithResolversPolyfill();
