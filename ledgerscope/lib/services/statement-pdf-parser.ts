@@ -49,14 +49,14 @@ function normalizeExtractedText(text: string) {
   return text.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/[ \t]{2,}/g, " ").trim();
 }
 
-function parseDateToken(token: string): Date | undefined {
+function parseDateToken(token: string, defaultYear = new Date().getUTCFullYear()): Date | undefined {
   for (const pattern of DATE_PATTERNS) {
     const match = token.match(pattern);
     if (!match) continue;
     const month = Number(match[1]);
     const day = Number(match[2]);
     const yearRaw = match[3];
-    const year = yearRaw ? (yearRaw.length === 2 ? 2000 + Number(yearRaw) : Number(yearRaw)) : new Date().getUTCFullYear();
+    const year = yearRaw ? (yearRaw.length === 2 ? 2000 + Number(yearRaw) : Number(yearRaw)) : defaultYear;
     const date = new Date(Date.UTC(year, month - 1, day));
     if (!Number.isNaN(date.getTime())) return date;
   }
@@ -163,29 +163,77 @@ function normalizeMerchant(description: string) {
     .slice(0, 80);
 }
 
-function parseTransactionLines(text: string): ParsedStatementTransaction[] {
-  const chunks = text
+function inferDirection(description: string) {
+  const normalized = description.toLowerCase();
+  if (
+    /\b(payroll|deposit|interest payment|zelle from|transfer from|webxfr p2p|refund)\b/i.test(normalized)
+  ) {
+    return "CREDIT" as const;
+  }
+
+  return "DEBIT" as const;
+}
+
+function extractTransactionHistoryChunks(text: string) {
+  const lines = text
     .split(/\n+/g)
     .map((chunk) => chunk.trim())
     .filter((chunk) => chunk.length > 0)
-    // Some PDFs include huge object-like fragments; keep reasonable lines only.
     .filter((chunk) => chunk.length <= 500);
 
+  const chunks: string[] = [];
+  let inTransactionHistory = false;
+  let current: string | null = null;
+
+  for (const line of lines) {
+    if (/^Transaction history$/i.test(line)) {
+      inTransactionHistory = true;
+      current = null;
+      continue;
+    }
+
+    if (!inTransactionHistory) continue;
+
+    if (/^Totals\b/i.test(line)) {
+      if (current) chunks.push(current);
+      current = null;
+      inTransactionHistory = false;
+      continue;
+    }
+
+    if (/^(Check\s+)?Deposits\b|^Date Description\b|Ending daily/i.test(line)) continue;
+
+    if (/^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/.test(line)) {
+      if (current) chunks.push(current);
+      current = line;
+      continue;
+    }
+
+    if (current) current = `${current} ${line}`;
+  }
+
+  if (current) chunks.push(current);
+
+  return chunks;
+}
+
+function parseTransactionLines(text: string, defaultYear?: number): ParsedStatementTransaction[] {
+  const chunks = extractTransactionHistoryChunks(text);
   const parsed: ParsedStatementTransaction[] = [];
 
   for (const chunk of chunks) {
-    const dateMatch = chunk.match(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/);
+    const dateMatch = chunk.match(/^\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/);
     if (!dateMatch) continue;
 
     const amountMatches = [...chunk.matchAll(/-?\(?\$?\d[\d,]*\.\d{2}\)?/g)];
-    const amountToken = amountMatches.at(-1)?.[0];
+    const amountToken = amountMatches[0]?.[0];
     const amount = amountToken ? parseAmountToken(amountToken) : undefined;
     if (typeof amount !== "number") continue;
 
-    const date = parseDateToken(dateMatch[0]);
+    const date = parseDateToken(dateMatch[0], defaultYear);
     const description = chunk
       .replace(dateMatch[0], "")
-      .replace(amountToken ?? "", "")
+      .replace(/-?\(?\$?\d[\d,]*\.\d{2}\)?/g, "")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -196,7 +244,7 @@ function parseTransactionLines(text: string): ParsedStatementTransaction[] {
       description,
       merchant: normalizeMerchant(description),
       amount: Math.abs(amount),
-      direction: amount < 0 ? "CREDIT" : "DEBIT",
+      direction: amount < 0 ? "CREDIT" : inferDirection(description),
       confidence: date ? 0.86 : 0.62,
       rawLine: chunk,
     });
@@ -223,8 +271,9 @@ export async function parseStatementPdf(buffer: Buffer, filename: string): Promi
     };
   }
 
-  const transactions = parseTransactionLines(text);
   const { start, end } = detectStatementPeriod(text);
+  const statementYear = end?.getUTCFullYear() ?? start?.getUTCFullYear();
+  const transactions = parseTransactionLines(text, statementYear);
   const accountLabel = detectAccountLabel(filename, text);
 
   if (transactions.length === 0) {
