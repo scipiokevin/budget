@@ -18,6 +18,7 @@ type SettingsDraft = {
 };
 
 const STORAGE_KEY = "ledgerscope.settings";
+const FINANCIAL_RESET_CONFIRMATION = "RESET";
 const DEFAULT_SETTINGS: SettingsDraft = {
   emailAlerts: true,
   weeklyRecap: true,
@@ -56,6 +57,11 @@ export default function SettingsPage() {
   const [statementUploadSuccess, setStatementUploadSuccess] = useState<string | null>(null);
   const [statementPreview, setStatementPreview] = useState<StatementImportPreview | null>(null);
   const [selectedEntryIds, setSelectedEntryIds] = useState<string[]>([]);
+  const [showFinancialResetConfirmation, setShowFinancialResetConfirmation] = useState(false);
+  const [financialResetConfirmation, setFinancialResetConfirmation] = useState("");
+  const [financialResetLoading, setFinancialResetLoading] = useState(false);
+  const [financialResetError, setFinancialResetError] = useState<string | null>(null);
+  const [financialResetSuccess, setFinancialResetSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = readStoredSettings();
@@ -225,6 +231,45 @@ export default function SettingsPage() {
     setSelectedEntryIds((current) => (current.includes(entryId) ? current.filter((id) => id !== entryId) : [...current, entryId]));
   }
 
+  async function handleFinancialReset() {
+    setFinancialResetError(null);
+    setFinancialResetSuccess(null);
+
+    if (financialResetConfirmation !== FINANCIAL_RESET_CONFIRMATION) {
+      setFinancialResetError("Type RESET exactly before clearing financial data.");
+      return;
+    }
+
+    setFinancialResetLoading(true);
+
+    try {
+      const response = await appApi.resetFinancialData(financialResetConfirmation);
+      setStatementPreview(null);
+      setSelectedEntryIds([]);
+      setStatementHistory([]);
+      setStatementUploadError(null);
+      setStatementUploadSuccess(null);
+      setShowFinancialResetConfirmation(false);
+      setFinancialResetConfirmation("");
+      await loadStatementHistory();
+
+      const summary = response.summary;
+      const message = `Removed ${summary.transactionsDeleted} transactions, ${summary.bankConnectionsDeleted} bank connections, ${summary.statementImportsDeleted} statement imports, and ${summary.budgetsDeleted} budgets.`;
+      setFinancialResetSuccess(message);
+      pushToast({
+        title: "Financial data cleared",
+        message,
+        variant: "success",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to clear financial data.";
+      setFinancialResetError(message);
+      pushToast({ title: "Reset failed", message, variant: "error" });
+    } finally {
+      setFinancialResetLoading(false);
+    }
+  }
+
   const actions: HeaderAction[] = [
     {
       label: "Save Changes",
@@ -251,8 +296,12 @@ export default function SettingsPage() {
       <DataSurface>
         {error ? <ErrorState message={error} onDismiss={() => setError(null)} /> : null}
         {statementUploadError ? <ErrorState message={statementUploadError} onDismiss={() => setStatementUploadError(null)} /> : null}
+        {financialResetError ? <ErrorState message={financialResetError} onDismiss={() => setFinancialResetError(null)} /> : null}
         {statementUploadSuccess ? (
           <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{statementUploadSuccess}</p>
+        ) : null}
+        {financialResetSuccess ? (
+          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{financialResetSuccess}</p>
         ) : null}
 
         <section className="grid gap-4 xl:grid-cols-2">
@@ -489,6 +538,70 @@ export default function SettingsPage() {
             </WidgetCard>
           </section>
         ) : null}
+
+        <section>
+          <WidgetCard
+            title="Reset financial data"
+            description="Clear synced and imported financial data if incorrect transactions, budgets, or statement imports were added."
+          >
+            <div className="space-y-4 text-sm">
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800">
+                This removes financial records only. Your login, account profile, and local settings stay in place. Connected banks, transactions,
+                budgets, exports, watchlist rules, statement imports, and generated insights will be deleted.
+              </div>
+
+              {!showFinancialResetConfirmation ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFinancialResetError(null);
+                    setFinancialResetSuccess(null);
+                    setShowFinancialResetConfirmation(true);
+                  }}
+                  className="rounded-xl border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition-colors duration-150 hover:border-rose-400 hover:bg-rose-50"
+                >
+                  Reset financial data
+                </button>
+              ) : (
+                <div className="space-y-3 rounded-xl border border-rose-200 bg-white px-4 py-4">
+                  <p className="text-sm text-slate-700">
+                    Type <span className="font-semibold text-rose-700">{FINANCIAL_RESET_CONFIRMATION}</span> to confirm permanent deletion.
+                  </p>
+                  <input
+                    type="text"
+                    value={financialResetConfirmation}
+                    onChange={(event) => setFinancialResetConfirmation(event.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+                    placeholder={FINANCIAL_RESET_CONFIRMATION}
+                    disabled={financialResetLoading}
+                  />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => void handleFinancialReset()}
+                      disabled={financialResetLoading || financialResetConfirmation !== FINANCIAL_RESET_CONFIRMATION}
+                      className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition-colors duration-150 hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {financialResetLoading ? "Clearing data..." : "Confirm reset"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowFinancialResetConfirmation(false);
+                        setFinancialResetConfirmation("");
+                        setFinancialResetError(null);
+                      }}
+                      disabled={financialResetLoading}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors duration-150 hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </WidgetCard>
+        </section>
       </DataSurface>
     </PageShell>
   );

@@ -651,6 +651,21 @@ export type StatementImportHistoryResponse = {
   items: StatementImportHistoryItem[];
 };
 
+export type FinancialResetSummary = {
+  bankConnectionsDeleted: number;
+  transactionsDeleted: number;
+  budgetsDeleted: number;
+  statementImportsDeleted: number;
+  watchRulesDeleted: number;
+  exportsDeleted: number;
+  insightsDeleted: number;
+};
+
+export type FinancialResetResponse = {
+  ok: boolean;
+  summary: FinancialResetSummary;
+};
+
 export type AppApiError = {
   error: string;
 };

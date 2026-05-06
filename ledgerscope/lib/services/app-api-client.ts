@@ -6,8 +6,9 @@ import type {
   DashboardData,
   ExportCreatePayload,
   ExportCreateResponse,
-  FinancialHealthMetricsData,
   ExportsData,
+  FinancialHealthMetricsData,
+  FinancialResetResponse,
   ForecastOverviewData,
   IncomeData,
   InsightsData,
@@ -186,6 +187,11 @@ export const appApi = {
     requestJson<{ ok: boolean }>(`/api/statement-imports/${id}`, {
       method: "POST",
       body: JSON.stringify({ action: "cancel" }),
+    }),
+  resetFinancialData: (confirmation: string) =>
+    requestJson<FinancialResetResponse>("/api/settings/reset-financial-data", {
+      method: "POST",
+      body: JSON.stringify({ confirmation }),
     }),
   getSettings: () => requestJson<SettingsData>("/api/settings"),
   getBusiness: () => requestJson<BusinessData>("/api/business"),
