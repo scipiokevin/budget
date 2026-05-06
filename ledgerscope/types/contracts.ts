@@ -645,6 +645,21 @@ export type StatementImportPreview = {
   transactions: StatementImportEntryPreview[];
 };
 
+export type StatementImportDraftPreview = {
+  importKind: "statement_pdf";
+  filename: string;
+  fileSize: number;
+  mimeType: string;
+  accountLabel?: string;
+  statementPeriodStart?: string;
+  statementPeriodEnd?: string;
+  parserStatus: "parsed" | "needs_review" | "failed";
+  parserMessage?: string;
+  parserConfidence: number;
+  detectedTransactionCount: number;
+  transactions: StatementImportEntryPreview[];
+};
+
 export type StatementImportHistoryItem = {
   id: string;
   importKind: ImportKind;
@@ -658,6 +673,10 @@ export type StatementImportHistoryItem = {
 
 export type StatementImportUploadResponse = {
   importPreview: StatementImportPreview;
+};
+
+export type StatementImportPreviewResponse = {
+  preview: StatementImportDraftPreview;
 };
 
 export type StatementImportFinalizeResponse = {

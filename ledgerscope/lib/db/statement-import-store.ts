@@ -8,6 +8,7 @@ import {
   type SpreadsheetRawRow,
 } from "@/lib/services/spreadsheet-import-parser";
 import type {
+  StatementImportDraftPreview,
   StatementImportEntryPreview,
   StatementImportFinalizeResponse,
   StatementImportHistoryItem,
@@ -186,6 +187,30 @@ function mapEntryPreview(row: StatementImportEntryRow): StatementImportEntryPrev
     duplicateTransactionId: row.duplicateTransactionId ?? undefined,
     duplicateReason: row.duplicateTransactionId ? "Possible duplicate found in existing transactions." : undefined,
     selectedForImport: row.selectedForImport,
+  };
+}
+
+function mapDraftEntryPreview(row: {
+  id: string;
+  date: Date | null;
+  description: string;
+  merchant: string | null;
+  amount: number;
+  direction: PrismaTransactionDirection | null;
+  confidence: number;
+  duplicateTransactionId: string | null;
+}): StatementImportEntryPreview {
+  return {
+    id: row.id,
+    date: row.date?.toISOString().slice(0, 10),
+    description: row.description,
+    merchant: row.merchant ?? undefined,
+    amount: row.amount,
+    direction: row.direction ? row.direction.toLowerCase() as "debit" | "credit" : undefined,
+    confidence: row.confidence,
+    duplicateTransactionId: row.duplicateTransactionId ?? undefined,
+    duplicateReason: row.duplicateTransactionId ? "Possible duplicate found in existing transactions." : undefined,
+    selectedForImport: true,
   };
 }
 
@@ -391,6 +416,45 @@ export async function createStatementImportFromPdf(
 
   return {
     importPreview: mapImportPreview(statementImport),
+  };
+}
+
+export async function previewStatementImportFromPdf(
+  userId: string,
+  file: { filename: string; mimeType: string; size: number; buffer: Buffer },
+): Promise<StatementImportDraftPreview> {
+  const parsed = await parseStatementPdf(file.buffer, file.filename);
+
+  const transactions = await Promise.all(
+    parsed.transactions.map(async (transaction, index) => ({
+      id: `preview-${index + 1}`,
+      date: normalizeToUtcDate(transaction.date),
+      description: transaction.description,
+      merchant: transaction.merchant ?? null,
+      amount: transaction.amount,
+      direction: transaction.direction ?? null,
+      confidence: transaction.confidence,
+      duplicateTransactionId: await findDuplicateTransactionId(userId, {
+        date: normalizeToUtcDate(transaction.date) ?? undefined,
+        amount: transaction.amount,
+        merchant: transaction.merchant,
+      }),
+    })),
+  );
+
+  return {
+    importKind: "statement_pdf",
+    filename: file.filename,
+    fileSize: file.size,
+    mimeType: file.mimeType,
+    accountLabel: parsed.accountLabel,
+    statementPeriodStart: parsed.statementPeriodStart?.toISOString(),
+    statementPeriodEnd: parsed.statementPeriodEnd?.toISOString(),
+    parserStatus: parsed.parserStatus,
+    parserMessage: parsed.parserMessage,
+    parserConfidence: parsed.parserConfidence,
+    detectedTransactionCount: parsed.transactions.length,
+    transactions: transactions.map(mapDraftEntryPreview),
   };
 }
 

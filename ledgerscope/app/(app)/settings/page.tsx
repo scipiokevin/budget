@@ -12,6 +12,7 @@ import { formatCurrencyAmount } from "@/lib/utils/format";
 import type {
   ImportKind,
   SpreadsheetImportMapping,
+  StatementImportDraftPreview,
   StatementImportHistoryItem,
   StatementImportPreview,
 } from "@/types/contracts";
@@ -100,6 +101,8 @@ export default function SettingsPage() {
   const [statementActionLoading, setStatementActionLoading] = useState(false);
   const [statementUploadError, setStatementUploadError] = useState<string | null>(null);
   const [statementUploadSuccess, setStatementUploadSuccess] = useState<string | null>(null);
+  const [pendingStatementFile, setPendingStatementFile] = useState<File | null>(null);
+  const [statementDraftPreview, setStatementDraftPreview] = useState<StatementImportDraftPreview | null>(null);
   const [statementPreview, setStatementPreview] = useState<StatementImportPreview | null>(null);
   const [selectedEntryIds, setSelectedEntryIds] = useState<string[]>([]);
   const [spreadsheetMappingDraft, setSpreadsheetMappingDraft] = useState<SpreadsheetImportMapping>({});
@@ -130,6 +133,10 @@ export default function SettingsPage() {
 
   const isSpreadsheetPreview = statementPreview?.importKind === "spreadsheet";
   const spreadsheetColumns = isSpreadsheetPreview ? (statementPreview?.spreadsheetColumns ?? []) : [];
+  const draftSelectedEntryIds = useMemo(
+    () => statementDraftPreview?.transactions.filter((item) => !item.duplicateTransactionId).map((item) => item.id) ?? [],
+    [statementDraftPreview],
+  );
 
   async function loadStatementHistory() {
     setStatementHistoryLoading(true);
@@ -203,7 +210,7 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleStatementUpload(file: File | null) {
+  function handleStatementFileSelect(file: File | null) {
     if (!file) return;
 
     setStatementUploadError(null);
@@ -219,11 +226,51 @@ export default function SettingsPage() {
       return;
     }
 
+    setPendingStatementFile(file);
+    setStatementDraftPreview(null);
+    setStatementPreview(null);
+    setSelectedEntryIds([]);
+    setSpreadsheetMappingDraft({});
+  }
+
+  async function handlePreviewStatementPdf() {
+    if (!pendingStatementFile) return;
+
+    setStatementUploadError(null);
+    setStatementUploadSuccess(null);
+
     setStatementActionLoading(true);
 
     try {
-      const response = await appApi.uploadStatementPdf(file);
+      const response = await appApi.previewStatementPdf(pendingStatementFile);
+      setStatementDraftPreview(response.preview);
+      pushToast({
+        title: "Preview ready",
+        message: "Recognized statement data is ready to review before upload.",
+        variant: "success",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to preview the selected statement.";
+      setStatementUploadError(message);
+      pushToast({ title: "Preview failed", message, variant: "error" });
+    } finally {
+      setStatementActionLoading(false);
+    }
+  }
+
+  async function handleStatementUpload() {
+    if (!pendingStatementFile) return;
+
+    setStatementUploadError(null);
+    setStatementUploadSuccess(null);
+
+    setStatementActionLoading(true);
+
+    try {
+      const response = await appApi.uploadStatementPdf(pendingStatementFile);
       applyPreviewState(response.importPreview, "Statement uploaded. Review extracted transactions before importing.");
+      setStatementDraftPreview(null);
+      setPendingStatementFile(null);
       pushToast({ title: "Statement ready", message: "Review extracted transactions before importing them.", variant: "success" });
       await loadStatementHistory();
     } catch (err) {
@@ -329,6 +376,8 @@ export default function SettingsPage() {
       setStatementUploadSuccess(`${importKindLabel(statementPreview.importKind)} import cancelled.`);
       setStatementPreview(null);
       setSelectedEntryIds([]);
+      setPendingStatementFile(null);
+      setStatementDraftPreview(null);
       setSpreadsheetMappingDraft({});
       pushToast({ title: "Import cancelled", message: "The import preview was cleared without importing transactions.", variant: "info" });
       await loadStatementHistory();
@@ -360,6 +409,8 @@ export default function SettingsPage() {
       const response = await appApi.resetFinancialData(financialResetConfirmation);
       setStatementPreview(null);
       setSelectedEntryIds([]);
+      setPendingStatementFile(null);
+      setStatementDraftPreview(null);
       setSpreadsheetMappingDraft({});
       setStatementHistory([]);
       setStatementUploadError(null);
@@ -501,13 +552,45 @@ export default function SettingsPage() {
                     type="file"
                     accept="application/pdf,.pdf"
                     className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-                    onChange={(event) => void handleStatementUpload(event.target.files?.[0] ?? null)}
+                    onChange={(event) => handleStatementFileSelect(event.target.files?.[0] ?? null)}
                     disabled={statementActionLoading}
                   />
                 </label>
 
+                {pendingStatementFile ? (
+                  <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                    <p className="font-medium text-slate-900">{pendingStatementFile.name}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {(pendingStatementFile.size / 1024).toFixed(1)} KB • {pendingStatementFile.type || "application/pdf"}
+                    </p>
+                  </div>
+                ) : null}
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handlePreviewStatementPdf()}
+                    disabled={statementActionLoading || !pendingStatementFile}
+                    className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors duration-150 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {statementActionLoading && !statementPreview ? "Previewing..." : "Preview recognized data"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingStatementFile(null);
+                      setStatementDraftPreview(null);
+                      setStatementUploadError(null);
+                    }}
+                    disabled={statementActionLoading || !pendingStatementFile}
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors duration-150 hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Clear file
+                  </button>
+                </div>
+
                 <p className="text-xs text-slate-500">
-                  PDF only. Maximum file size: 10 MB. Statement imports are labeled separately from Plaid activity.
+                  PDF only. Maximum file size: 10 MB. Preview recognized data before saving the import to history.
                 </p>
               </div>
             </WidgetCard>
@@ -570,6 +653,117 @@ export default function SettingsPage() {
             )}
           </WidgetCard>
         </section>
+
+        {statementDraftPreview ? (
+          <section>
+            <WidgetCard title="Preview recognized PDF data" description="Review what LedgerScope recognized before the statement is uploaded into import history.">
+              <div className="space-y-4 text-sm">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Import type</p>
+                    <p className="mt-1 font-medium text-slate-900">Statement PDF</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.12em] text-slate-500">File</p>
+                    <p className="mt-1 font-medium text-slate-900">{statementDraftPreview.filename}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Account label</p>
+                    <p className="mt-1 font-medium text-slate-900">{statementDraftPreview.accountLabel ?? "Not detected"}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Parser confidence</p>
+                    <p className="mt-1 font-medium text-slate-900">{Math.round(statementDraftPreview.parserConfidence * 100)}%</p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.12em] text-slate-500">Statement period</p>
+                  <p className="mt-1 font-medium text-slate-900">
+                    {statementDraftPreview.statementPeriodStart && statementDraftPreview.statementPeriodEnd
+                      ? `${new Date(statementDraftPreview.statementPeriodStart).toLocaleDateString()} - ${new Date(statementDraftPreview.statementPeriodEnd).toLocaleDateString()}`
+                      : "Not detected"}
+                  </p>
+                </div>
+
+                {statementDraftPreview.parserMessage ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800">
+                    {statementDraftPreview.parserMessage}
+                  </div>
+                ) : null}
+
+                {statementDraftPreview.transactions.length === 0 ? (
+                  <EmptyState
+                    title="No transactions recognized yet"
+                    detail="LedgerScope could not confidently detect transactions from this PDF preview. You can try a different statement before saving anything."
+                  />
+                ) : (
+                  <div className="overflow-hidden rounded-2xl border border-slate-200">
+                    <table className="min-w-full bg-white text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-600">
+                        <tr>
+                          <th className="px-4 py-3 font-medium">Date</th>
+                          <th className="px-4 py-3 font-medium">Merchant</th>
+                          <th className="px-4 py-3 font-medium">Description</th>
+                          <th className="px-4 py-3 text-right font-medium">Amount</th>
+                          <th className="px-4 py-3 font-medium">Direction</th>
+                          <th className="px-4 py-3 font-medium">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {statementDraftPreview.transactions.map((entry) => (
+                          <tr key={entry.id} className="border-t border-slate-100">
+                            <td className="px-4 py-3 text-xs text-slate-600">{entry.date ?? "Unknown"}</td>
+                            <td className="px-4 py-3 font-medium text-slate-900">{entry.merchant ?? "Unknown merchant"}</td>
+                            <td className="px-4 py-3 text-slate-600">{entry.description}</td>
+                            <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatCurrencyAmount(entry.amount)}</td>
+                            <td className="px-4 py-3 text-xs uppercase tracking-[0.08em] text-slate-500">{entry.direction ?? "unknown"}</td>
+                            <td className="px-4 py-3">
+                              {entry.duplicateTransactionId ? (
+                                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                                  Possible duplicate
+                                </span>
+                              ) : (
+                                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                  {Math.round(entry.confidence * 100)}% confidence
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void handleStatementUpload()}
+                    disabled={statementActionLoading || !pendingStatementFile || draftSelectedEntryIds.length === 0}
+                    className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors duration-150 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {statementActionLoading ? "Uploading..." : "Use this preview for import"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStatementDraftPreview(null);
+                      setStatementUploadSuccess(null);
+                    }}
+                    disabled={statementActionLoading}
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors duration-150 hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Close preview
+                  </button>
+                  <p className="text-xs text-slate-500">
+                    Nothing is saved to import history until you continue with this preview.
+                  </p>
+                </div>
+              </div>
+            </WidgetCard>
+          </section>
+        ) : null}
 
         {statementPreview ? (
           <section>

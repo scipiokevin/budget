@@ -14,6 +14,7 @@ import type {
   InsightsData,
   StatementImportFinalizeResponse,
   StatementImportHistoryResponse,
+  StatementImportPreviewResponse,
   StatementImportRemapResponse,
   SpreadsheetImportMapping,
   StatementImportUploadResponse,
@@ -179,6 +180,32 @@ export const appApi = {
     }
 
     return (await response.json()) as StatementImportUploadResponse;
+  },
+  previewStatementPdf: async (file: File): Promise<StatementImportPreviewResponse> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("mode", "preview");
+
+    const response = await fetch("/api/statement-imports", {
+      method: "POST",
+      body: formData,
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      let detail: string | undefined;
+
+      try {
+        const body = (await response.json()) as { error?: string };
+        detail = body.error;
+      } catch {
+        detail = undefined;
+      }
+
+      throw new Error(detail ?? "Failed to preview statement PDF.");
+    }
+
+    return (await response.json()) as StatementImportPreviewResponse;
   },
   uploadSpreadsheetFile: async (file: File): Promise<StatementImportUploadResponse> => {
     const formData = new FormData();

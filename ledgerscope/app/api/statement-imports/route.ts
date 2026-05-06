@@ -4,6 +4,7 @@ import {
   createStatementImportFromPdf,
   createStatementImportFromSpreadsheet,
   getStatementImportHistory,
+  previewStatementImportFromPdf,
 } from "@/lib/db/statement-import-store";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -62,6 +63,7 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file");
+    const mode = String(formData.get("mode") ?? "").toLowerCase();
 
     if (!isUploadedStatementFile(file)) {
       console.error("Statement import upload rejected: invalid file payload", {
@@ -87,7 +89,23 @@ export async function POST(request: NextRequest) {
       filename: file.name,
       mimeType: file.type,
       size: file.size,
+      mode: mode || "create",
     });
+    if (mode === "preview") {
+      if (!isPdf) {
+        return NextResponse.json({ error: "Preview mode is only available for PDF statements right now." }, { status: 400 });
+      }
+
+      const preview = await previewStatementImportFromPdf(userId, {
+        filename: file.name,
+        mimeType: file.type || "application/pdf",
+        size: file.size,
+        buffer: Buffer.from(arrayBuffer),
+      });
+
+      return NextResponse.json({ preview });
+    }
+
     const response = await (isPdf ? createStatementImportFromPdf(userId, {
       filename: file.name,
       mimeType: file.type || "application/pdf",
