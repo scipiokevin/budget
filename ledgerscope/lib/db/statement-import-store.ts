@@ -44,6 +44,17 @@ function toNumber(value: DecimalLike | number | null | undefined) {
   return typeof value === "number" ? value : Number(value.toString());
 }
 
+function normalizeToUtcDate(value: Date | null | undefined): Date | null {
+  if (!value) return null;
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate(), 0, 0, 0, 0));
+}
+
+function utcDayRange(value: Date) {
+  const start = normalizeToUtcDate(value) ?? new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate(), 0, 0, 0, 0));
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
 function normalizeMerchant(value: string | null | undefined) {
   return (value ?? "")
     .trim()
@@ -88,11 +99,12 @@ function mapEntryPreview(row: StatementImportEntryRow): StatementImportEntryPrev
 async function findDuplicateTransactionId(userId: string, params: { date?: Date; amount: number; merchant?: string }) {
   if (!params.date) return null;
 
+  const { start, end } = utcDayRange(params.date);
   const existing = await prisma.transaction.findFirst({
     where: {
       userId,
       status: { not: TRANSACTION_STATUS.REMOVED },
-      date: params.date,
+      date: { gte: start, lt: end },
       amount: params.amount,
     },
     select: {
@@ -117,7 +129,10 @@ export async function createStatementImportFromPdf(
   userId: string,
   file: { filename: string; mimeType: string; size: number; buffer: Buffer },
 ): Promise<StatementImportUploadResponse> {
-  const parsed = parseStatementPdf(file.buffer, file.filename);
+  const parsed = await parseStatementPdf(file.buffer, file.filename);
+
+  const normalizedPeriodStart = normalizeToUtcDate(parsed.statementPeriodStart);
+  const normalizedPeriodEnd = normalizeToUtcDate(parsed.statementPeriodEnd);
 
   const statementImport = await prisma.statementImport.create({
     data: {
@@ -126,8 +141,8 @@ export async function createStatementImportFromPdf(
       fileSize: file.size,
       mimeType: file.mimeType,
       accountLabel: parsed.accountLabel,
-      statementPeriodStart: parsed.statementPeriodStart,
-      statementPeriodEnd: parsed.statementPeriodEnd,
+      statementPeriodStart: normalizedPeriodStart,
+      statementPeriodEnd: normalizedPeriodEnd,
       parserStatus: parsed.parserStatus,
       parserMessage: parsed.parserMessage,
       parserConfidence: parsed.parserConfidence,
@@ -136,14 +151,14 @@ export async function createStatementImportFromPdf(
         create: await Promise.all(
           parsed.transactions.map(async (transaction) => ({
             userId,
-            date: transaction.date,
+            date: normalizeToUtcDate(transaction.date),
             description: transaction.description,
             merchant: transaction.merchant,
             amount: transaction.amount,
             direction: transaction.direction,
             confidence: transaction.confidence,
             duplicateTransactionId: await findDuplicateTransactionId(userId, {
-              date: transaction.date,
+              date: normalizeToUtcDate(transaction.date) ?? undefined,
               amount: transaction.amount,
               merchant: transaction.merchant,
             }),
@@ -293,8 +308,17 @@ export async function finalizeStatementImport(
       continue;
     }
 
+    const normalizedEntryDate = normalizeToUtcDate(entry.date);
+    if (!normalizedEntryDate) {
+      await prisma.statementImportEntry.update({
+        where: { id: entry.id },
+        data: { selectedForImport: false },
+      });
+      continue;
+    }
+
     const duplicateId = await findDuplicateTransactionId(userId, {
-      date: entry.date,
+      date: normalizedEntryDate,
       amount: toNumber(entry.amount),
       merchant: entry.merchant ?? entry.description,
     });
@@ -313,8 +337,8 @@ export async function finalizeStatementImport(
     const transaction = await prisma.transaction.create({
       data: {
         userId,
-        date: entry.date,
-        postedAt: entry.date,
+        date: normalizedEntryDate,
+        postedAt: normalizedEntryDate,
         amount: toNumber(entry.amount),
         currency: "USD",
         direction: entry.direction ?? TRANSACTION_DIRECTION.DEBIT,

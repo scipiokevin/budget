@@ -8,6 +8,9 @@ const finalizeSchema = z.object({
   selectedEntryIds: z.array(z.string().min(1)).optional(),
 });
 
+// This route relies on Node primitives (JSON parsing + Prisma) and should not run on Edge.
+export const runtime = "nodejs";
+
 type RouteContext = {
   params: Promise<{ id: string }>;
 };

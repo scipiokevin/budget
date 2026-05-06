@@ -23,17 +23,30 @@ const DATE_PATTERNS = [
   /\b(\d{1,2})\/(\d{1,2})\b/,
 ];
 
-function toAscii(buffer: Buffer) {
-  return buffer.toString("latin1").replace(/\u0000/g, " ");
+type PdfTextItem = {
+  str: string;
+  transform?: number[];
+};
+
+function ensurePromiseWithResolversPolyfill() {
+  // pdfjs-dist uses Promise.withResolvers in newer releases; Node < 22 may not have it.
+  if (typeof (Promise as unknown as { withResolvers?: unknown }).withResolvers === "function") return;
+
+  (Promise as unknown as {
+    withResolvers: <T>() => { promise: Promise<T>; resolve: (value: T | PromiseLike<T>) => void; reject: (reason?: unknown) => void };
+  }).withResolvers = <T>() => {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
 }
 
-function extractVisibleText(raw: string) {
-  return raw
-    .replace(/\\r/g, " ")
-    .replace(/\\n/g, " ")
-    .replace(/[^\x20-\x7E]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function normalizeExtractedText(text: string) {
+  return text.replace(/\r\n/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/[ \t]{2,}/g, " ").trim();
 }
 
 function parseDateToken(token: string): Date | undefined {
@@ -48,6 +61,68 @@ function parseDateToken(token: string): Date | undefined {
     if (!Number.isNaN(date.getTime())) return date;
   }
   return undefined;
+}
+
+async function extractPdfText(buffer: Buffer) {
+  ensurePromiseWithResolversPolyfill();
+
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const task = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+  const doc = await task.promise;
+
+  try {
+    const pages: string[] = [];
+    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
+      const page = await doc.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const items = (content.items ?? []) as unknown[];
+
+      const positioned: Array<{ text: string; x: number; y: number }> = [];
+      for (const item of items) {
+        const candidate = item as Partial<PdfTextItem>;
+        const text = typeof candidate.str === "string" ? candidate.str : "";
+        if (!text.trim()) continue;
+        const transform = Array.isArray(candidate.transform) ? candidate.transform : undefined;
+        const x = typeof transform?.[4] === "number" ? transform[4] : 0;
+        const y = typeof transform?.[5] === "number" ? transform[5] : 0;
+        positioned.push({ text, x, y });
+      }
+
+      // Sort visually: top-to-bottom, then left-to-right.
+      positioned.sort((a, b) => (b.y - a.y) || (a.x - b.x));
+
+      const lines: string[] = [];
+      let currentY: number | null = null;
+      let currentLine: string[] = [];
+
+      for (const item of positioned) {
+        if (currentY === null) {
+          currentY = item.y;
+          currentLine.push(item.text);
+          continue;
+        }
+
+        const sameLine = Math.abs(item.y - currentY) <= 2;
+        if (sameLine) {
+          currentLine.push(item.text);
+        } else {
+          const line = currentLine.join(" ").replace(/\s+/g, " ").trim();
+          if (line) lines.push(line);
+          currentLine = [item.text];
+          currentY = item.y;
+        }
+      }
+
+      const last = currentLine.join(" ").replace(/\s+/g, " ").trim();
+      if (last) lines.push(last);
+
+      pages.push(lines.join("\n"));
+    }
+
+    return normalizeExtractedText(pages.join("\n"));
+  } finally {
+    await doc.destroy();
+  }
 }
 
 function detectStatementPeriod(text: string): { start?: Date; end?: Date } {
@@ -90,9 +165,11 @@ function normalizeMerchant(description: string) {
 
 function parseTransactionLines(text: string): ParsedStatementTransaction[] {
   const chunks = text
-    .split(/(?=\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b)/g)
+    .split(/\n+/g)
     .map((chunk) => chunk.trim())
-    .filter((chunk) => chunk.length > 0);
+    .filter((chunk) => chunk.length > 0)
+    // Some PDFs include huge object-like fragments; keep reasonable lines only.
+    .filter((chunk) => chunk.length <= 500);
 
   const parsed: ParsedStatementTransaction[] = [];
 
@@ -128,9 +205,14 @@ function parseTransactionLines(text: string): ParsedStatementTransaction[] {
   return parsed.slice(0, 250);
 }
 
-export function parseStatementPdf(buffer: Buffer, filename: string): ParsedStatementResult {
-  const raw = toAscii(buffer);
-  const text = extractVisibleText(raw);
+export async function parseStatementPdf(buffer: Buffer, filename: string): Promise<ParsedStatementResult> {
+  let text: string;
+  try {
+    text = await extractPdfText(buffer);
+  } catch (error) {
+    console.error("statement-pdf-parser: extract failed", error);
+    text = "";
+  }
 
   if (!text) {
     return {

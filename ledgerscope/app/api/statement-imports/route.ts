@@ -4,6 +4,9 @@ import { createStatementImportFromPdf, getStatementImportHistory } from "@/lib/d
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
+// This route relies on Node primitives (Buffer) for PDF parsing.
+export const runtime = "nodejs";
+
 export async function GET() {
   const userId = await getCurrentUserId();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
